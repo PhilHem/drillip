@@ -1,5 +1,5 @@
 errors.db
 errors.db-wal
 errors.db-shm
-error-sink
+drillip
 *.exe

@@ -1,4 +1,4 @@
-module github.com/PhilHem/error-sink
+module github.com/PhilHem/drillip
 
 go 1.26
 

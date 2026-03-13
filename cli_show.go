@@ -9,7 +9,7 @@ import (
 
 func runShow(args []string, w io.Writer) {
 	if len(args) == 0 {
-		fmt.Fprintln(w, "usage: error-sink show <fingerprint>")
+		fmt.Fprintln(w, "usage: drillip show <fingerprint>")
 		return
 	}
 	fp := args[0]
@@ -83,5 +83,5 @@ func runShow(args []string, w io.Writer) {
 		}
 	}
 
-	printHint(w, "error-sink trend "+fullFP[:8], "error-sink correlate "+fullFP[:8])
+	printHint(w, "drillip trend "+fullFP[:8], "drillip correlate "+fullFP[:8])
 }

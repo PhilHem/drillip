@@ -41,5 +41,5 @@ func runTop(args []string, w io.Writer) {
 	}
 
 	printTable(w, []string{"FINGERPRINT", "COUNT", "TYPE", "VALUE", "LAST SEEN"}, tableRows)
-	printHint(w, "error-sink show <fingerprint>")
+	printHint(w, "drillip show <fingerprint>")
 }

@@ -1,4 +1,4 @@
-"""Send realistic errors to error-sink via the Sentry Python SDK."""
+"""Send realistic errors to drillip via the Sentry Python SDK."""
 import sentry_sdk
 import time
 

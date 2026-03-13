@@ -329,17 +329,17 @@ func TestOccurrenceTraceID(t *testing.T) {
 
 func TestEnvOverrides(t *testing.T) {
 	// Just verify env vars are read (don't actually start server)
-	os.Setenv("ERROR_SINK_DB", "/tmp/custom.db")
-	os.Setenv("ERROR_SINK_ADDR", "0.0.0.0:9999")
-	defer os.Unsetenv("ERROR_SINK_DB")
-	defer os.Unsetenv("ERROR_SINK_ADDR")
+	os.Setenv("DRILLIP_DB", "/tmp/custom.db")
+	os.Setenv("DRILLIP_ADDR", "0.0.0.0:9999")
+	defer os.Unsetenv("DRILLIP_DB")
+	defer os.Unsetenv("DRILLIP_ADDR")
 
 	dbPath := "errors.db"
 	addr := "127.0.0.1:8300"
-	if v := os.Getenv("ERROR_SINK_DB"); v != "" {
+	if v := os.Getenv("DRILLIP_DB"); v != "" {
 		dbPath = v
 	}
-	if v := os.Getenv("ERROR_SINK_ADDR"); v != "" {
+	if v := os.Getenv("DRILLIP_ADDR"); v != "" {
 		addr = v
 	}
 

@@ -7,7 +7,7 @@ import (
 
 func runReleases(args []string, w io.Writer) {
 	if len(args) == 0 {
-		fmt.Fprintln(w, "usage: error-sink releases <fingerprint>")
+		fmt.Fprintln(w, "usage: drillip releases <fingerprint>")
 		return
 	}
 	fp := args[0]

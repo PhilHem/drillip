@@ -23,25 +23,25 @@ func loadConfig() Config {
 		DB:   "errors.db",
 		Addr: "127.0.0.1:8300",
 	}
-	if v := os.Getenv("ERROR_SINK_DB"); v != "" {
+	if v := os.Getenv("DRILLIP_DB"); v != "" {
 		cfg.DB = v
 	}
-	if v := os.Getenv("ERROR_SINK_ADDR"); v != "" {
+	if v := os.Getenv("DRILLIP_ADDR"); v != "" {
 		cfg.Addr = v
 	}
-	if v := os.Getenv("ERROR_SINK_UNIT"); v != "" {
+	if v := os.Getenv("DRILLIP_UNIT"); v != "" {
 		cfg.Unit = v
 	}
-	if v := os.Getenv("ERROR_SINK_VM_URL"); v != "" {
+	if v := os.Getenv("DRILLIP_VM_URL"); v != "" {
 		cfg.VMURL = v
 	}
-	if v := os.Getenv("ERROR_SINK_VT_URL"); v != "" {
+	if v := os.Getenv("DRILLIP_VT_URL"); v != "" {
 		cfg.VTURL = v
 	}
-	if v := os.Getenv("ERROR_SINK_PYROSCOPE_URL"); v != "" {
+	if v := os.Getenv("DRILLIP_PYROSCOPE_URL"); v != "" {
 		cfg.PyroscopeURL = v
 	}
-	if v := os.Getenv("ERROR_SINK_SERVICE"); v != "" {
+	if v := os.Getenv("DRILLIP_SERVICE"); v != "" {
 		cfg.Service = v
 	}
 	return cfg
@@ -71,7 +71,7 @@ func runServe(cfg Config) {
 	mux.HandleFunc("/api/", handleIngest)
 	mux.HandleFunc("/-/healthy", handleHealth)
 
-	log.Printf("error-sink listening on %s (db: %s)", cfg.Addr, cfg.DB)
+	log.Printf("drillip listening on %s (db: %s)", cfg.Addr, cfg.DB)
 	if err := http.ListenAndServe(cfg.Addr, mux); err != nil {
 		log.Fatal(err)
 	}
@@ -117,6 +117,7 @@ func main() {
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
 		fmt.Fprintln(os.Stderr, "commands: serve, top, recent, show, trend, correlate, releases, stats, gc, health")
+
 		os.Exit(1)
 	}
 }

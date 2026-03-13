@@ -8,7 +8,7 @@ import (
 
 func runTrend(args []string, w io.Writer) {
 	if len(args) == 0 {
-		fmt.Fprintln(w, "usage: error-sink trend <fingerprint>")
+		fmt.Fprintln(w, "usage: drillip trend <fingerprint>")
 		return
 	}
 	fp := args[0]
@@ -63,5 +63,5 @@ func runTrend(args []string, w io.Writer) {
 		printBar(w, label, b.count, maxCount, 30)
 	}
 
-	printHint(w, "error-sink correlate "+fullFP[:8])
+	printHint(w, "drillip correlate "+fullFP[:8])
 }

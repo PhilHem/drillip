@@ -1,4 +1,4 @@
-BINARY := error-sink
+BINARY := drillip
 
 .PHONY: build test lint fmt clean
 

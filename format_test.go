@@ -140,12 +140,12 @@ func TestTimeAgo(t *testing.T) {
 
 func TestPrintHint(t *testing.T) {
 	var buf bytes.Buffer
-	printHint(&buf, "error-sink top", "error-sink show abc")
+	printHint(&buf, "drillip top", "drillip show abc")
 	out := buf.String()
-	if !strings.Contains(out, "→ error-sink top") {
+	if !strings.Contains(out, "→ drillip top") {
 		t.Fatalf("missing hint: %s", out)
 	}
-	if !strings.Contains(out, "→ error-sink show abc") {
+	if !strings.Contains(out, "→ drillip show abc") {
 		t.Fatalf("missing second hint: %s", out)
 	}
 }

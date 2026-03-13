@@ -44,5 +44,5 @@ func runRecent(args []string, w io.Writer) {
 
 	fmt.Fprintf(w, "New errors (last %dh):\n\n", *hours)
 	printTable(w, []string{"FINGERPRINT", "COUNT", "TYPE", "VALUE", "FIRST SEEN"}, tableRows)
-	printHint(w, "error-sink show <fingerprint>")
+	printHint(w, "drillip show <fingerprint>")
 }

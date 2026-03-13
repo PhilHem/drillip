@@ -9,7 +9,7 @@ import (
 
 func runCorrelate(args []string, w io.Writer, cfg Config) {
 	if len(args) == 0 {
-		fmt.Fprintln(w, "usage: error-sink correlate <fingerprint>")
+		fmt.Fprintln(w, "usage: drillip correlate <fingerprint>")
 		return
 	}
 
@@ -19,7 +19,7 @@ func runCorrelate(args []string, w io.Writer, cfg Config) {
 
 	fp := fs.Arg(0)
 	if fp == "" {
-		fmt.Fprintln(w, "usage: error-sink correlate <fingerprint>")
+		fmt.Fprintln(w, "usage: drillip correlate <fingerprint>")
 		return
 	}
 
@@ -143,5 +143,5 @@ func runCorrelate(args []string, w io.Writer, cfg Config) {
 	}
 
 	// Next hints
-	printHint(w, "error-sink show "+fullFP[:8], "error-sink trend "+fullFP[:8])
+	printHint(w, "drillip show "+fullFP[:8], "drillip trend "+fullFP[:8])
 }

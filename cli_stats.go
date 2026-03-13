@@ -30,5 +30,5 @@ func runStats(_ []string, w io.Writer) {
 		fmt.Fprintf(w, "Last seen:          %s\n", maxTime)
 	}
 
-	printHint(w, "error-sink top")
+	printHint(w, "drillip top")
 }

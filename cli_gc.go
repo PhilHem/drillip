@@ -33,7 +33,7 @@ func parseDuration(s string) (time.Duration, error) {
 
 func runGC(args []string, w io.Writer) {
 	if len(args) == 0 {
-		fmt.Fprintln(w, "usage: error-sink gc <duration> (e.g., 7d, 30d, 24h)")
+		fmt.Fprintln(w, "usage: drillip gc <duration> (e.g., 7d, 30d, 24h)")
 		return
 	}
 

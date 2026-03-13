@@ -3,12 +3,12 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /error-sink .
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /drillip .
 
 FROM scratch
-COPY --from=build /error-sink /error-sink
+COPY --from=build /drillip /drillip
 VOLUME /data
-ENV ERROR_SINK_DB=/data/errors.db
-ENV ERROR_SINK_ADDR=0.0.0.0:8300
+ENV DRILLIP_DB=/data/errors.db
+ENV DRILLIP_ADDR=0.0.0.0:8300
 EXPOSE 8300
-ENTRYPOINT ["/error-sink"]
+ENTRYPOINT ["/drillip"]
