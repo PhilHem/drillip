@@ -14,14 +14,14 @@ func runShow(args []string, w io.Writer) {
 	}
 	fp := args[0]
 
-	var fullFP, typ, val, stacktrace, breadcrumbs, release, env, userCtx, tags, platform, firstSeen, lastSeen string
+	var fullFP, typ, val, lvl, stacktrace, breadcrumbs, release, env, userCtx, tags, platform, firstSeen, lastSeen string
 	var count int
 	err := db.QueryRow(`
-		SELECT fingerprint, type, value, stacktrace, breadcrumbs,
+		SELECT fingerprint, type, value, level, stacktrace, breadcrumbs,
 			release_tag, environment, user_context, tags, platform,
 			first_seen, last_seen, count
 		FROM errors WHERE fingerprint LIKE ?||'%' LIMIT 1
-	`, fp).Scan(&fullFP, &typ, &val, &stacktrace, &breadcrumbs,
+	`, fp).Scan(&fullFP, &typ, &val, &lvl, &stacktrace, &breadcrumbs,
 		&release, &env, &userCtx, &tags, &platform,
 		&firstSeen, &lastSeen, &count)
 	if err != nil {
@@ -34,6 +34,7 @@ func runShow(args []string, w io.Writer) {
 
 	printSection(w, "Error")
 	fmt.Fprintf(w, "Fingerprint: %s\n", fullFP)
+	fmt.Fprintf(w, "Level:       %s\n", lvl)
 	fmt.Fprintf(w, "Type:        %s\n", typ)
 	fmt.Fprintf(w, "Value:       %s\n", val)
 	fmt.Fprintf(w, "Count:       %d\n", count)

@@ -11,9 +11,9 @@ func insertTestError(t *testing.T, fp, typ, val, release string) {
 	t.Helper()
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := db.Exec(`
-		INSERT INTO errors (fingerprint, type, value, stacktrace, breadcrumbs,
+		INSERT INTO errors (fingerprint, type, value, level, stacktrace, breadcrumbs,
 			release_tag, environment, user_context, tags, platform, first_seen, last_seen, count)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+		VALUES (?, ?, ?, 'error', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
 		ON CONFLICT(fingerprint) DO UPDATE SET
 			last_seen = ?, count = count + 1
 	`, fp, typ, val,

@@ -6,7 +6,10 @@ import "encoding/json"
 
 type Event struct {
 	EventID     string                     `json:"event_id"`
+	Level       string                     `json:"level"`
 	Exception   *ExceptionData             `json:"exception"`
+	LogEntry    *LogEntry                  `json:"logentry"`
+	Message     string                     `json:"message"`
 	Breadcrumbs *BreadcrumbData            `json:"breadcrumbs"`
 	Contexts    map[string]json.RawMessage `json:"contexts"`
 	Release     string                     `json:"release"`
@@ -15,6 +18,33 @@ type Event struct {
 	Tags        map[string]string          `json:"tags"`
 	Platform    string                     `json:"platform"`
 	ServerName  string                     `json:"server_name"`
+}
+
+// EffectiveLevel returns the event level, defaulting based on type.
+func (e *Event) EffectiveLevel() string {
+	if e.Level != "" {
+		return e.Level
+	}
+	if e.Exception != nil && len(e.Exception.Values) > 0 {
+		return "error"
+	}
+	return "info"
+}
+
+type LogEntry struct {
+	Formatted string `json:"formatted"`
+	Message   string `json:"message"`
+}
+
+// messageText returns the best available message string.
+func (e *Event) messageText() string {
+	if e.LogEntry != nil {
+		if e.LogEntry.Formatted != "" {
+			return e.LogEntry.Formatted
+		}
+		return e.LogEntry.Message
+	}
+	return e.Message
 }
 
 // TraceID extracts the trace_id from contexts.trace safely.

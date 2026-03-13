@@ -25,6 +25,7 @@ func initDB(path string) error {
 			fingerprint  TEXT UNIQUE,
 			type         TEXT,
 			value        TEXT,
+			level        TEXT DEFAULT 'error',
 			stacktrace   TEXT,
 			breadcrumbs  TEXT,
 			release_tag  TEXT,
@@ -41,6 +42,7 @@ func initDB(path string) error {
 		CREATE INDEX IF NOT EXISTS idx_errors_type ON errors(type);
 		CREATE INDEX IF NOT EXISTS idx_errors_release ON errors(release_tag);
 		CREATE INDEX IF NOT EXISTS idx_errors_count ON errors(count);
+		CREATE INDEX IF NOT EXISTS idx_errors_level ON errors(level);
 
 		CREATE TABLE IF NOT EXISTS occurrences (
 			id          INTEGER PRIMARY KEY AUTOINCREMENT,

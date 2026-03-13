@@ -133,10 +133,11 @@ func TestHandleEnvelopeEvent(t *testing.T) {
 	}
 }
 
-func TestHandleNonErrorEvent(t *testing.T) {
+func TestHandleEmptyEvent(t *testing.T) {
 	setupTestDB(t)
 
-	body := []byte(`{"event_id":"no-exc","message":"just a message"}`)
+	// No exception, no message — should be accepted but not stored
+	body := []byte(`{"event_id":"no-content"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/1/store/", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	handleIngest(w, req)
@@ -233,7 +234,7 @@ func TestOccurrenceInsertion(t *testing.T) {
 		},
 	}
 
-	if err := storeError(&event); err != nil {
+	if err := storeEvent(&event); err != nil {
 		t.Fatalf("store: %v", err)
 	}
 
@@ -246,7 +247,7 @@ func TestOccurrenceInsertion(t *testing.T) {
 	}
 
 	// Send again — should get 2 occurrences
-	if err := storeError(&event); err != nil {
+	if err := storeEvent(&event); err != nil {
 		t.Fatalf("store: %v", err)
 	}
 	if err := db.QueryRow("SELECT COUNT(*) FROM occurrences").Scan(&occCount); err != nil {
@@ -314,7 +315,7 @@ func TestOccurrenceTraceID(t *testing.T) {
 		},
 	}
 
-	if err := storeError(&event); err != nil {
+	if err := storeEvent(&event); err != nil {
 		t.Fatalf("store: %v", err)
 	}
 
@@ -324,6 +325,107 @@ func TestOccurrenceTraceID(t *testing.T) {
 	}
 	if traceID != "deadbeef12345678" {
 		t.Fatalf("expected deadbeef12345678, got %q", traceID)
+	}
+}
+
+func TestHandleMessageEvent(t *testing.T) {
+	setupTestDB(t)
+
+	body := []byte(`{"event_id":"msg-1","level":"info","logentry":{"formatted":"Deployment started for v1.2.0","message":"Deployment started for %s"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/1/store/", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	handleIngest(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var typ, val, level string
+	if err := db.QueryRow("SELECT type, value, level FROM errors WHERE type = 'message'").Scan(&typ, &val, &level); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if typ != "message" {
+		t.Fatalf("expected type=message, got %q", typ)
+	}
+	if val != "Deployment started for v1.2.0" {
+		t.Fatalf("expected formatted message, got %q", val)
+	}
+	if level != "info" {
+		t.Fatalf("expected level=info, got %q", level)
+	}
+}
+
+func TestHandleMessageWithPlainField(t *testing.T) {
+	setupTestDB(t)
+
+	// Some SDKs send "message" field instead of "logentry"
+	body := []byte(`{"event_id":"msg-2","level":"warning","message":"disk space low"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/1/store/", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	handleIngest(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var val, level string
+	if err := db.QueryRow("SELECT value, level FROM errors WHERE value = 'disk space low'").Scan(&val, &level); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if level != "warning" {
+		t.Fatalf("expected level=warning, got %q", level)
+	}
+}
+
+func TestMessageFingerprinting(t *testing.T) {
+	// Same message = same fingerprint
+	ev1 := Event{Message: "deploy started"}
+	ev2 := Event{Message: "deploy started"}
+	if fingerprint(&ev1) != fingerprint(&ev2) {
+		t.Fatal("same message should produce same fingerprint")
+	}
+
+	// Different message = different fingerprint
+	ev3 := Event{Message: "deploy finished"}
+	if fingerprint(&ev1) == fingerprint(&ev3) {
+		t.Fatal("different message should produce different fingerprint")
+	}
+
+	// Message vs exception = different fingerprint
+	ev4 := Event{
+		Exception: &ExceptionData{
+			Values: []ExceptionValue{{Type: "Error", Value: "deploy started"}},
+		},
+	}
+	if fingerprint(&ev1) == fingerprint(&ev4) {
+		t.Fatal("message and exception with same text should differ")
+	}
+}
+
+func TestExceptionLevelDefault(t *testing.T) {
+	ev := Event{
+		Exception: &ExceptionData{
+			Values: []ExceptionValue{{Type: "RuntimeError", Value: "boom"}},
+		},
+	}
+	if got := ev.EffectiveLevel(); got != "error" {
+		t.Fatalf("expected error, got %q", got)
+	}
+}
+
+func TestMessageLevelDefault(t *testing.T) {
+	ev := Event{Message: "hello"}
+	if got := ev.EffectiveLevel(); got != "info" {
+		t.Fatalf("expected info, got %q", got)
+	}
+}
+
+func TestExplicitLevelOverride(t *testing.T) {
+	ev := Event{Level: "fatal", Exception: &ExceptionData{
+		Values: []ExceptionValue{{Type: "OOM", Value: "out of memory"}},
+	}}
+	if got := ev.EffectiveLevel(); got != "fatal" {
+		t.Fatalf("expected fatal, got %q", got)
 	}
 }
 

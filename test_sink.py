@@ -59,6 +59,15 @@ try:
 except RuntimeError:
     sentry_sdk.capture_exception()
 
+# Message 1: info-level deployment notice
+sentry_sdk.capture_message("Deployment started for v1.2.0")
+
+# Message 2: warning-level disk space alert
+sentry_sdk.capture_message("Disk usage at 92%", level="warning")
+
+# Message 3: same deployment message again (should increment count)
+sentry_sdk.capture_message("Deployment started for v1.2.0")
+
 # Flush to ensure all events are sent
 sentry_sdk.flush(timeout=5)
-print("Done — sent 5 errors (4 unique, 1 duplicate)")
+print("Done — sent 8 events (6 unique: 4 errors + 2 messages, 2 duplicates)")

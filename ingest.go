@@ -48,18 +48,23 @@ func readBody(r *http.Request) ([]byte, error) {
 	return io.ReadAll(reader)
 }
 
-func storeError(ev *Event) error {
+func storeEvent(ev *Event) error {
 	fp := fingerprint(ev)
 	now := time.Now().UTC().Format(time.RFC3339)
+	level := ev.EffectiveLevel()
 
-	var excType, excValue, stacktraceJSON string
+	var evType, evValue, stacktraceJSON string
+
 	if ev.Exception != nil && len(ev.Exception.Values) > 0 {
 		exc := ev.Exception.Values[0]
-		excType = exc.Type
-		excValue = exc.Value
+		evType = exc.Type
+		evValue = exc.Value
 		if b, err := json.Marshal(exc.Stacktrace); err == nil {
 			stacktraceJSON = string(b)
 		}
+	} else {
+		evType = "message"
+		evValue = ev.messageText()
 	}
 
 	var breadcrumbsJSON string
@@ -85,16 +90,16 @@ func storeError(ev *Event) error {
 	defer func() { _ = tx.Rollback() }()
 
 	_, err = tx.Exec(`
-		INSERT INTO errors (fingerprint, type, value, stacktrace, breadcrumbs,
+		INSERT INTO errors (fingerprint, type, value, level, stacktrace, breadcrumbs,
 			release_tag, environment, user_context, tags, platform, first_seen, last_seen)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(fingerprint) DO UPDATE SET
 			last_seen = ?,
 			count = count + 1,
 			breadcrumbs = ?,
 			user_context = ?,
 			release_tag = COALESCE(?, release_tag)
-	`, fp, excType, excValue, stacktraceJSON, breadcrumbsJSON,
+	`, fp, evType, evValue, level, stacktraceJSON, breadcrumbsJSON,
 		ev.Release, ev.Environment, userJSON, tagsJSON, ev.Platform, now, now,
 		now, breadcrumbsJSON, userJSON, ev.Release)
 	if err != nil {
@@ -134,14 +139,17 @@ func handleIngest(w http.ResponseWriter, r *http.Request) {
 		event = &ev
 	}
 
-	if event.Exception == nil || len(event.Exception.Values) == 0 {
+	// Need either an exception or a message to store
+	hasException := event.Exception != nil && len(event.Exception.Values) > 0
+	hasMessage := event.messageText() != ""
+	if !hasException && !hasMessage {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"ok"}`))
 		return
 	}
 
-	if err := storeError(event); err != nil {
-		log.Printf("store error: %v", err)
+	if err := storeEvent(event); err != nil {
+		log.Printf("store event: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}

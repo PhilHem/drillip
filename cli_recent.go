@@ -10,14 +10,20 @@ import (
 func runRecent(args []string, w io.Writer) {
 	fs := flag.NewFlagSet("recent", flag.ExitOnError)
 	hours := fs.Int("hours", 1, "look back N hours")
+	level := fs.String("level", "", "filter by level (error, warning, info, etc.)")
 	_ = fs.Parse(args)
 
 	since := time.Now().UTC().Add(-time.Duration(*hours) * time.Hour).Format(time.RFC3339)
 
-	rows, err := db.Query(`
-		SELECT fingerprint, count, type, value, first_seen
-		FROM errors WHERE first_seen > ? ORDER BY first_seen DESC
-	`, since)
+	query := `SELECT fingerprint, count, type, value, level, first_seen FROM errors WHERE first_seen > ?`
+	queryArgs := []interface{}{since}
+	if *level != "" {
+		query += ` AND level = ?`
+		queryArgs = append(queryArgs, *level)
+	}
+	query += ` ORDER BY first_seen DESC`
+
+	rows, err := db.Query(query, queryArgs...)
 	if err != nil {
 		fmt.Fprintf(w, "error: %v\n", err)
 		return
@@ -26,14 +32,14 @@ func runRecent(args []string, w io.Writer) {
 
 	var tableRows [][]string
 	for rows.Next() {
-		var fp, typ, val, firstSeen string
+		var fp, typ, val, lvl, firstSeen string
 		var count int
-		if err := rows.Scan(&fp, &count, &typ, &val, &firstSeen); err != nil {
+		if err := rows.Scan(&fp, &count, &typ, &val, &lvl, &firstSeen); err != nil {
 			continue
 		}
 		t, _ := time.Parse(time.RFC3339, firstSeen)
 		tableRows = append(tableRows, []string{
-			fp[:8], fmt.Sprintf("%d", count), typ, truncate(val, 50), timeAgo(t),
+			fp[:8], fmt.Sprintf("%d", count), lvl, typ, truncate(val, 50), timeAgo(t),
 		})
 	}
 
@@ -43,6 +49,6 @@ func runRecent(args []string, w io.Writer) {
 	}
 
 	fmt.Fprintf(w, "New errors (last %dh):\n\n", *hours)
-	printTable(w, []string{"FINGERPRINT", "COUNT", "TYPE", "VALUE", "FIRST SEEN"}, tableRows)
+	printTable(w, []string{"FINGERPRINT", "COUNT", "LEVEL", "TYPE", "VALUE", "FIRST SEEN"}, tableRows)
 	printHint(w, "drillip show <fingerprint>")
 }
