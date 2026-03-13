@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.3 - 2026-03-13
+
+### Fixed
+
+- GHCR image tags now include the `v` prefix (e.g. `v0.1.3` not `0.1.3`) matching git tag convention
+- Added `drillip-data.volume` quadlet file so Podman systemd resolves the volume dependency by filename
+- Root path (`/`) now returns health status instead of 404, so generic readiness probes work without knowing `/-/healthy`
+
 ## v0.1.2 - 2026-03-13
 
 ### Added
