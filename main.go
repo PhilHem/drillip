@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -80,8 +81,23 @@ func runServe(cfg Config) {
 func main() {
 	cfg := loadConfig()
 
+	// Parse global flags before subcommand
+	globalFlags := flag.NewFlagSet("drillip", flag.ContinueOnError)
+	dbFlag := globalFlags.String("db", "", "database path (overrides DRILLIP_DB)")
+	addrFlag := globalFlags.String("addr", "", "listen address (overrides DRILLIP_ADDR)")
+	_ = globalFlags.Parse(os.Args[1:])
+
+	if *dbFlag != "" {
+		cfg.DB = *dbFlag
+	}
+	if *addrFlag != "" {
+		cfg.Addr = *addrFlag
+	}
+
+	remaining := globalFlags.Args()
+
 	// No args or "serve" → start HTTP server
-	if len(os.Args) < 2 || os.Args[1] == "serve" {
+	if len(remaining) == 0 || remaining[0] == "serve" {
 		runServe(cfg)
 		return
 	}
@@ -92,8 +108,8 @@ func main() {
 	}
 	defer db.Close()
 
-	cmd := os.Args[1]
-	args := os.Args[2:]
+	cmd := remaining[0]
+	args := remaining[1:]
 
 	switch cmd {
 	case "top":
@@ -117,7 +133,6 @@ func main() {
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
 		fmt.Fprintln(os.Stderr, "commands: serve, top, recent, show, trend, correlate, releases, stats, gc, health")
-
 		os.Exit(1)
 	}
 }
