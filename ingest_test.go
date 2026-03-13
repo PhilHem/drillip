@@ -589,6 +589,142 @@ func TestAPIStats(t *testing.T) {
 	}
 }
 
+func TestAPIRecent(t *testing.T) {
+	setupTestDB(t)
+
+	event := Event{
+		Exception: &ExceptionData{Values: []ExceptionValue{{Type: "RecentAPIErr", Value: "recent api",
+			Stacktrace: &Stacktrace{Frames: []Frame{{Filename: "r.go", Function: "f", Lineno: 1}}}}}},
+	}
+	if _, err := storeEvent(&event); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/0/recent/?hours=1", nil)
+	w := httptest.NewRecorder()
+	handleAPIRecent(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var results []apiError
+	if err := json.Unmarshal(w.Body.Bytes(), &results); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(results) != 1 || results[0].Type != "RecentAPIErr" {
+		t.Fatalf("unexpected: %+v", results)
+	}
+}
+
+func TestAPITrend(t *testing.T) {
+	setupTestDB(t)
+
+	event := Event{
+		Exception: &ExceptionData{Values: []ExceptionValue{{Type: "TrendAPIErr", Value: "trend api",
+			Stacktrace: &Stacktrace{Frames: []Frame{{Filename: "t.go", Function: "f", Lineno: 1}}}}}},
+	}
+	fp, err := storeEvent(&event)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/0/trend/"+fp[:8]+"/", nil)
+	w := httptest.NewRecorder()
+	handleAPITrend(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var result map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if _, ok := result["fingerprint"]; !ok {
+		t.Fatal("missing fingerprint in response")
+	}
+	if _, ok := result["buckets"]; !ok {
+		t.Fatal("missing buckets in response")
+	}
+}
+
+func TestAPIReleases(t *testing.T) {
+	setupTestDB(t)
+
+	event := Event{
+		Release: "v5.0.0",
+		Exception: &ExceptionData{Values: []ExceptionValue{{Type: "RelAPIErr", Value: "rel api",
+			Stacktrace: &Stacktrace{Frames: []Frame{{Filename: "r.go", Function: "f", Lineno: 1}}}}}},
+	}
+	fp, err := storeEvent(&event)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/0/releases/"+fp[:8]+"/", nil)
+	w := httptest.NewRecorder()
+	handleAPIReleases(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var result map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	var releases []apiRelease
+	if err := json.Unmarshal(result["releases"], &releases); err != nil {
+		t.Fatalf("parse releases: %v", err)
+	}
+	if len(releases) != 1 || releases[0].Release != "v5.0.0" {
+		t.Fatalf("unexpected releases: %+v", releases)
+	}
+}
+
+func TestAPIGC(t *testing.T) {
+	setupTestDB(t)
+
+	event := Event{
+		Exception: &ExceptionData{Values: []ExceptionValue{{Type: "GCAPIErr", Value: "gc api",
+			Stacktrace: &Stacktrace{Frames: []Frame{{Filename: "g.go", Function: "f", Lineno: 1}}}}}},
+	}
+	if _, err := storeEvent(&event); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	// GC with 0h should delete all occurrences
+	req := httptest.NewRequest(http.MethodPost, "/api/0/gc/?older_than=0h", nil)
+	w := httptest.NewRecorder()
+	handleAPIGC(w, req)
+
+	// 0h is invalid (parseDuration needs >= 2 chars with valid number)
+	// Use 1h — occurrence was just created, so nothing should be deleted
+	req = httptest.NewRequest(http.MethodPost, "/api/0/gc/?older_than=1h", nil)
+	w = httptest.NewRecorder()
+	handleAPIGC(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var result apiGCResult
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if result.Deleted != 0 {
+		t.Fatalf("expected 0 deleted (occurrence is fresh), got %d", result.Deleted)
+	}
+}
+
+func TestAPIGCRequiresPost(t *testing.T) {
+	setupTestDB(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/0/gc/?older_than=7d", nil)
+	w := httptest.NewRecorder()
+	handleAPIGC(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", w.Code)
+	}
+}
+
 func TestEnvOverrides(t *testing.T) {
 	// Just verify env vars are read (don't actually start server)
 	os.Setenv("DRILLIP_DB", "/tmp/custom.db")

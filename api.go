@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type apiError struct {
@@ -201,6 +203,191 @@ func queryTagDistribution(fp string) map[string]tagDist {
 		result[k] = td
 	}
 	return result
+}
+
+func handleAPIRecent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	hours := 1
+	if h := r.URL.Query().Get("hours"); h != "" {
+		if n, err := strconv.Atoi(h); err == nil && n > 0 {
+			hours = n
+		}
+	}
+
+	since := time.Now().UTC().Add(-time.Duration(hours) * time.Hour).Format(time.RFC3339)
+
+	query := `SELECT fingerprint, count, type, value, level, first_seen FROM errors WHERE first_seen > ?`
+	queryArgs := []interface{}{since}
+	if level := r.URL.Query().Get("level"); level != "" {
+		query += ` AND level = ?`
+		queryArgs = append(queryArgs, level)
+	}
+	if tag := r.URL.Query().Get("tag"); tag != "" {
+		if k, v, ok := parseTag(tag); ok {
+			query += ` AND json_extract(tags, '$.'||?) = ?`
+			queryArgs = append(queryArgs, k, v)
+		}
+	}
+	query += ` ORDER BY first_seen DESC`
+
+	rows, err := db.Query(query, queryArgs...)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var results []apiError
+	for rows.Next() {
+		var e apiError
+		if err := rows.Scan(&e.Fingerprint, &e.Count, &e.Type, &e.Value, &e.Level, &e.LastSeen); err != nil {
+			continue
+		}
+		results = append(results, e)
+	}
+
+	writeJSON(w, results)
+}
+
+type apiBucket struct {
+	Hour  string `json:"hour"`
+	Count int    `json:"count"`
+}
+
+func handleAPITrend(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	fp := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/0/trend/"), "/")
+	if fp == "" {
+		http.Error(w, "missing fingerprint", http.StatusBadRequest)
+		return
+	}
+
+	var fullFP string
+	if err := db.QueryRow("SELECT fingerprint FROM errors WHERE fingerprint LIKE ?||'%' LIMIT 1", fp).Scan(&fullFP); err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	since := time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339)
+	rows, err := db.Query(`
+		SELECT strftime('%Y-%m-%d %H:00', timestamp) AS hour, COUNT(*) AS cnt
+		FROM occurrences
+		WHERE fingerprint = ? AND timestamp > ?
+		GROUP BY hour ORDER BY hour
+	`, fullFP, since)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var buckets []apiBucket
+	for rows.Next() {
+		var b apiBucket
+		if err := rows.Scan(&b.Hour, &b.Count); err != nil {
+			continue
+		}
+		buckets = append(buckets, b)
+	}
+
+	writeJSON(w, map[string]interface{}{
+		"fingerprint": fullFP,
+		"buckets":     buckets,
+	})
+}
+
+type apiRelease struct {
+	Release   string `json:"release"`
+	Count     int    `json:"count"`
+	FirstSeen string `json:"first_seen"`
+	LastSeen  string `json:"last_seen"`
+}
+
+func handleAPIReleases(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	fp := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/0/releases/"), "/")
+	if fp == "" {
+		http.Error(w, "missing fingerprint", http.StatusBadRequest)
+		return
+	}
+
+	var fullFP string
+	if err := db.QueryRow("SELECT fingerprint FROM errors WHERE fingerprint LIKE ?||'%' LIMIT 1", fp).Scan(&fullFP); err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	rows, err := db.Query(`
+		SELECT COALESCE(release_tag, ''), COUNT(*),
+			MIN(timestamp), MAX(timestamp)
+		FROM occurrences WHERE fingerprint = ?
+		GROUP BY release_tag ORDER BY COUNT(*) DESC
+	`, fullFP)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var releases []apiRelease
+	for rows.Next() {
+		var rel apiRelease
+		if err := rows.Scan(&rel.Release, &rel.Count, &rel.FirstSeen, &rel.LastSeen); err != nil {
+			continue
+		}
+		releases = append(releases, rel)
+	}
+
+	writeJSON(w, map[string]interface{}{
+		"fingerprint": fullFP,
+		"releases":    releases,
+	})
+}
+
+type apiGCResult struct {
+	Deleted   int64  `json:"deleted"`
+	Threshold string `json:"threshold"`
+}
+
+func handleAPIGC(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	durStr := r.URL.Query().Get("older_than")
+	if durStr == "" {
+		http.Error(w, "missing older_than param (e.g., 7d, 30d, 24h)", http.StatusBadRequest)
+		return
+	}
+
+	dur, err := parseDuration(durStr)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	threshold := time.Now().UTC().Add(-dur).Format(time.RFC3339)
+	res, err := db.Exec("DELETE FROM occurrences WHERE timestamp < ?", threshold)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	deleted, _ := res.RowsAffected()
+
+	writeJSON(w, apiGCResult{Deleted: deleted, Threshold: threshold})
 }
 
 // writeJSON is a helper to write a value as JSON with the appropriate headers.

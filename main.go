@@ -75,8 +75,12 @@ func runServe(cfg Config) {
 	mux.HandleFunc("/api/", handleIngest)
 	mux.HandleFunc("/-/healthy", handleHealth)
 	mux.HandleFunc("/api/0/top/", handleAPITop)
+	mux.HandleFunc("/api/0/recent/", handleAPIRecent)
 	mux.HandleFunc("/api/0/show/", handleAPIShow)
+	mux.HandleFunc("/api/0/trend/", handleAPITrend)
+	mux.HandleFunc("/api/0/releases/", handleAPIReleases)
 	mux.HandleFunc("/api/0/stats/", handleAPIStats)
+	mux.HandleFunc("/api/0/gc/", handleAPIGC)
 
 	srv := &http.Server{Addr: cfg.Addr, Handler: mux}
 
