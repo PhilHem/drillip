@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.2 - 2026-03-13
+
+### Added
+
+- Sentry `capture_message()` events are now ingested alongside exceptions, with severity level tracking (fatal, error, warning, info, debug)
+- `top` and `recent` commands support `--level` filter to show only errors, warnings, or info messages
+- Systemd service unit (`drillip.service`) for bare-metal deployment with sandboxing and health check
+
 ## v0.1.1 - 2026-03-13
 
 ### Fixed
