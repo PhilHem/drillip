@@ -69,6 +69,7 @@ func runServe(cfg Config) {
 	defer db.Close()
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/", handleHealth)
 	mux.HandleFunc("/api/", handleIngest)
 	mux.HandleFunc("/-/healthy", handleHealth)
 

@@ -19,6 +19,7 @@ PodmanArgs=--cap-drop=ALL
 LogDriver=journald
 
 HealthCmd=/drillip health
+HealthStartPeriod=5s
 HealthInterval=30s
 HealthTimeout=5s
 HealthRetries=3
