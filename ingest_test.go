@@ -70,7 +70,9 @@ func TestHandlePlainJSONEvent(t *testing.T) {
 
 	// Verify stored
 	var count int
-	db.QueryRow("SELECT count FROM errors WHERE type = 'RuntimeError'").Scan(&count)
+	if err := db.QueryRow("SELECT count FROM errors WHERE type = 'RuntimeError'").Scan(&count); err != nil {
+		t.Fatalf("query: %v", err)
+	}
 	if count != 1 {
 		t.Fatalf("expected count 1, got %d", count)
 	}
@@ -80,7 +82,9 @@ func TestHandlePlainJSONEvent(t *testing.T) {
 	w = httptest.NewRecorder()
 	handleIngest(w, req)
 
-	db.QueryRow("SELECT count FROM errors WHERE type = 'RuntimeError'").Scan(&count)
+	if err := db.QueryRow("SELECT count FROM errors WHERE type = 'RuntimeError'").Scan(&count); err != nil {
+		t.Fatalf("query: %v", err)
+	}
 	if count != 2 {
 		t.Fatalf("expected count 2, got %d", count)
 	}
@@ -121,7 +125,9 @@ func TestHandleEnvelopeEvent(t *testing.T) {
 	}
 
 	var typ, release string
-	db.QueryRow("SELECT type, release_tag FROM errors WHERE type = 'ValueError'").Scan(&typ, &release)
+	if err := db.QueryRow("SELECT type, release_tag FROM errors WHERE type = 'ValueError'").Scan(&typ, &release); err != nil {
+		t.Fatalf("query: %v", err)
+	}
 	if typ != "ValueError" || release != "v2.0.0" {
 		t.Fatalf("unexpected: type=%q release=%q", typ, release)
 	}
@@ -140,7 +146,9 @@ func TestHandleNonErrorEvent(t *testing.T) {
 	}
 
 	var count int
-	db.QueryRow("SELECT COUNT(*) FROM errors").Scan(&count)
+	if err := db.QueryRow("SELECT COUNT(*) FROM errors").Scan(&count); err != nil {
+		t.Fatalf("query: %v", err)
+	}
 	if count != 0 {
 		t.Fatalf("expected 0 errors stored, got %d", count)
 	}
@@ -205,6 +213,117 @@ func TestFingerprintGrouping(t *testing.T) {
 	fp3 := fingerprint(&event3)
 	if fp1 == fp3 {
 		t.Fatalf("different location should have different fingerprint")
+	}
+}
+
+func TestOccurrenceInsertion(t *testing.T) {
+	setupTestDB(t)
+
+	event := Event{
+		EventID: "occ-test",
+		Release: "v3.0.0",
+		Exception: &ExceptionData{
+			Values: []ExceptionValue{{
+				Type:  "TestError",
+				Value: "occ test",
+				Stacktrace: &Stacktrace{
+					Frames: []Frame{{Filename: "occ.go", Function: "doStuff", Lineno: 1}},
+				},
+			}},
+		},
+	}
+
+	if err := storeError(&event); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	var occCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM occurrences").Scan(&occCount); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if occCount != 1 {
+		t.Fatalf("expected 1 occurrence, got %d", occCount)
+	}
+
+	// Send again — should get 2 occurrences
+	if err := storeError(&event); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	if err := db.QueryRow("SELECT COUNT(*) FROM occurrences").Scan(&occCount); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if occCount != 2 {
+		t.Fatalf("expected 2 occurrences, got %d", occCount)
+	}
+
+	// Verify release_tag
+	var release string
+	if err := db.QueryRow("SELECT release_tag FROM occurrences LIMIT 1").Scan(&release); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if release != "v3.0.0" {
+		t.Fatalf("expected release v3.0.0, got %q", release)
+	}
+}
+
+func TestTraceIDExtraction(t *testing.T) {
+	// No contexts
+	ev1 := Event{}
+	if got := ev1.TraceID(); got != "" {
+		t.Fatalf("expected empty, got %q", got)
+	}
+
+	// With trace context
+	ev2 := Event{
+		Contexts: map[string]json.RawMessage{
+			"trace": json.RawMessage(`{"trace_id":"abc123","span_id":"def456"}`),
+		},
+	}
+	if got := ev2.TraceID(); got != "abc123" {
+		t.Fatalf("expected abc123, got %q", got)
+	}
+
+	// Invalid JSON in trace context
+	ev3 := Event{
+		Contexts: map[string]json.RawMessage{
+			"trace": json.RawMessage(`not json`),
+		},
+	}
+	if got := ev3.TraceID(); got != "" {
+		t.Fatalf("expected empty for invalid json, got %q", got)
+	}
+}
+
+func TestOccurrenceTraceID(t *testing.T) {
+	setupTestDB(t)
+
+	event := Event{
+		EventID: "trace-test",
+		Release: "v1.0.0",
+		Exception: &ExceptionData{
+			Values: []ExceptionValue{{
+				Type:  "TraceError",
+				Value: "trace test",
+				Stacktrace: &Stacktrace{
+					Frames: []Frame{{Filename: "t.go", Function: "fn", Lineno: 1}},
+				},
+			}},
+		},
+		Contexts: map[string]json.RawMessage{
+			"trace": json.RawMessage(`{"trace_id":"deadbeef12345678"}`),
+		},
+	}
+
+	if err := storeError(&event); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	var traceID string
+	if err := db.QueryRow("SELECT trace_id FROM occurrences LIMIT 1").Scan(&traceID); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if traceID != "deadbeef12345678" {
+		t.Fatalf("expected deadbeef12345678, got %q", traceID)
 	}
 }
 
