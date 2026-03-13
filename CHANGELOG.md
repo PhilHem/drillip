@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.2.0 - 2026-03-14
+
+### Added
+
+- HTTP query API for remote access without CLI or container exec: `GET /api/0/top/`, `/api/0/recent/`, `/api/0/show/<fp>/`, `/api/0/trend/<fp>/`, `/api/0/releases/<fp>/`, `/api/0/stats/`, `POST /api/0/gc/`
+- Tag-based filtering: `--tag key=value` on CLI commands and `?tag=key=value` on API endpoints narrow results by any Sentry SDK tag (e.g. server, endpoint, region)
+- `show` command and `/api/0/show/` display tag distribution across occurrences (e.g. "server: web-1 80%, web-2 20%")
+- Ingest response now returns the stored fingerprint (`{"id":"04827c09..."}`) instead of a static `"ok"`, enabling callers to correlate events
+
+### Changed
+
+- Graceful shutdown now checkpoints the WAL, so `errors.db` is self-contained for backups and ad-hoc copies without needing the `-wal`/`-shm` files
+
+### Fixed
+
+- Upgrading from older schema versions no longer crashes — missing columns (`level`, `tags`) are auto-migrated on startup
+
 ## v0.1.3 - 2026-03-13
 
 ### Fixed
