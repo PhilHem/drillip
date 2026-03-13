@@ -18,6 +18,7 @@ PodmanArgs=--cap-drop=ALL
 
 LogDriver=journald
 
+# Uses the Go binary directly — no shell/curl/wget needed in scratch image
 HealthCmd=/drillip health
 HealthStartPeriod=5s
 HealthInterval=30s
