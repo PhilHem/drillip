@@ -343,3 +343,95 @@ func TestRunCorrelateNotFound(t *testing.T) {
 		t.Fatalf("expected not found: %s", buf.String())
 	}
 }
+
+// --- tag filtering ---
+
+func insertTestErrorWithTags(t *testing.T, fp, typ, val, release, tagsJSON string) {
+	t.Helper()
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := db.Exec(`
+		INSERT INTO errors (fingerprint, type, value, level, stacktrace, breadcrumbs,
+			release_tag, environment, user_context, tags, platform, first_seen, last_seen, count)
+		VALUES (?, ?, ?, 'error', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+		ON CONFLICT(fingerprint) DO UPDATE SET
+			last_seen = ?, count = count + 1
+	`, fp, typ, val,
+		`{"frames":[{"filename":"app.py","function":"main","lineno":42}]}`,
+		`[{"category":"http","message":"GET /api"}]`,
+		release, "production",
+		`{"id":"42","email":"test@example.com"}`,
+		tagsJSON,
+		"python", now, now,
+		now)
+	if err != nil {
+		t.Fatalf("insert error: %v", err)
+	}
+}
+
+func insertTestOccurrenceWithTags(t *testing.T, fp, release, traceID, tagsJSON string, ts time.Time) {
+	t.Helper()
+	_, err := db.Exec(`INSERT INTO occurrences (fingerprint, timestamp, release_tag, trace_id, tags) VALUES (?,?,?,?,?)`,
+		fp, ts.Format(time.RFC3339), release, traceID, tagsJSON)
+	if err != nil {
+		t.Fatalf("insert occurrence: %v", err)
+	}
+}
+
+func TestRunTopWithTagFilter(t *testing.T) {
+	setupTestDB(t)
+	insertTestErrorWithTags(t, "ttag111122223333", "TagErr1", "on web-1", "v1.0.0", `{"server":"web-1"}`)
+	insertTestErrorWithTags(t, "ttag222233334444", "TagErr2", "on web-2", "v1.0.0", `{"server":"web-2"}`)
+
+	var buf bytes.Buffer
+	runTop([]string{"--tag", "server=web-1"}, &buf)
+	out := buf.String()
+	if !strings.Contains(out, "TagErr1") {
+		t.Fatalf("missing TagErr1: %s", out)
+	}
+	if strings.Contains(out, "TagErr2") {
+		t.Fatalf("should not contain TagErr2: %s", out)
+	}
+}
+
+func TestRunRecentWithTagFilter(t *testing.T) {
+	setupTestDB(t)
+	insertTestErrorWithTags(t, "rtag111122223333", "RecentTag1", "tagged recent", "v1.0.0", `{"endpoint":"/api/orders"}`)
+	insertTestErrorWithTags(t, "rtag222233334444", "RecentTag2", "other recent", "v1.0.0", `{"endpoint":"/api/users"}`)
+
+	var buf bytes.Buffer
+	runRecent([]string{"--tag", "endpoint=/api/orders"}, &buf)
+	out := buf.String()
+	if !strings.Contains(out, "RecentTag1") {
+		t.Fatalf("missing RecentTag1: %s", out)
+	}
+	if strings.Contains(out, "RecentTag2") {
+		t.Fatalf("should not contain RecentTag2: %s", out)
+	}
+}
+
+func TestShowTagDistribution(t *testing.T) {
+	setupTestDB(t)
+	fp := "dist111122223333"
+	insertTestErrorWithTags(t, fp, "DistErr", "distribution test", "v1.0.0", `{"server":"web-1"}`)
+
+	now := time.Now().UTC()
+	insertTestOccurrenceWithTags(t, fp, "v1.0.0", "", `{"server":"web-1"}`, now)
+	insertTestOccurrenceWithTags(t, fp, "v1.0.0", "", `{"server":"web-1"}`, now.Add(-time.Minute))
+	insertTestOccurrenceWithTags(t, fp, "v1.0.0", "", `{"server":"web-2"}`, now.Add(-2*time.Minute))
+
+	var buf bytes.Buffer
+	runShow([]string{"dist"}, &buf)
+	out := buf.String()
+	if !strings.Contains(out, "Tag Distribution") {
+		t.Fatalf("missing tag distribution section: %s", out)
+	}
+	if !strings.Contains(out, "web-1") {
+		t.Fatalf("missing web-1 in distribution: %s", out)
+	}
+	if !strings.Contains(out, "web-2") {
+		t.Fatalf("missing web-2 in distribution: %s", out)
+	}
+	if !strings.Contains(out, "66%") {
+		t.Fatalf("missing percentage for web-1: %s", out)
+	}
+}

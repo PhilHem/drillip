@@ -49,7 +49,8 @@ func initDB(path string) error {
 			fingerprint TEXT NOT NULL,
 			timestamp   TEXT NOT NULL,
 			release_tag TEXT,
-			trace_id    TEXT
+			trace_id    TEXT,
+			tags        TEXT
 		);
 
 		CREATE INDEX IF NOT EXISTS idx_occ_fp_ts ON occurrences(fingerprint, timestamp);

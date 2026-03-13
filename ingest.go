@@ -106,8 +106,8 @@ func storeEvent(ev *Event) error {
 		return err
 	}
 
-	_, err = tx.Exec(`INSERT INTO occurrences (fingerprint, timestamp, release_tag, trace_id) VALUES (?,?,?,?)`,
-		fp, now, ev.Release, ev.TraceID())
+	_, err = tx.Exec(`INSERT INTO occurrences (fingerprint, timestamp, release_tag, trace_id, tags) VALUES (?,?,?,?,?)`,
+		fp, now, ev.Release, ev.TraceID(), tagsJSON)
 	if err != nil {
 		return err
 	}

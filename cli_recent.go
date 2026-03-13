@@ -11,6 +11,7 @@ func runRecent(args []string, w io.Writer) {
 	fs := flag.NewFlagSet("recent", flag.ExitOnError)
 	hours := fs.Int("hours", 1, "look back N hours")
 	level := fs.String("level", "", "filter by level (error, warning, info, etc.)")
+	tag := fs.String("tag", "", "filter by tag (key=value)")
 	_ = fs.Parse(args)
 
 	since := time.Now().UTC().Add(-time.Duration(*hours) * time.Hour).Format(time.RFC3339)
@@ -20,6 +21,12 @@ func runRecent(args []string, w io.Writer) {
 	if *level != "" {
 		query += ` AND level = ?`
 		queryArgs = append(queryArgs, *level)
+	}
+	if *tag != "" {
+		if k, v, ok := parseTag(*tag); ok {
+			query += ` AND json_extract(tags, '$.'||?) = ?`
+			queryArgs = append(queryArgs, k, v)
+		}
 	}
 	query += ` ORDER BY first_seen DESC`
 

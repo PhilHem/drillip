@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 )
 
@@ -11,13 +12,24 @@ func runTop(args []string, w io.Writer) {
 	fs := flag.NewFlagSet("top", flag.ExitOnError)
 	limit := fs.Int("limit", 10, "number of errors to show")
 	level := fs.String("level", "", "filter by level (error, warning, info, etc.)")
+	tag := fs.String("tag", "", "filter by tag (key=value)")
 	_ = fs.Parse(args)
 
 	query := `SELECT fingerprint, count, type, value, level, last_seen FROM errors`
+	var conditions []string
 	var queryArgs []interface{}
 	if *level != "" {
-		query += ` WHERE level = ?`
+		conditions = append(conditions, `level = ?`)
 		queryArgs = append(queryArgs, *level)
+	}
+	if *tag != "" {
+		if k, v, ok := parseTag(*tag); ok {
+			conditions = append(conditions, `json_extract(tags, '$.'||?) = ?`)
+			queryArgs = append(queryArgs, k, v)
+		}
+	}
+	if len(conditions) > 0 {
+		query += ` WHERE ` + strings.Join(conditions, ` AND `)
 	}
 	query += ` ORDER BY count DESC LIMIT ?`
 	queryArgs = append(queryArgs, *limit)

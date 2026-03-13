@@ -149,3 +149,25 @@ func TestPrintHint(t *testing.T) {
 		t.Fatalf("missing second hint: %s", out)
 	}
 }
+
+func TestParseTag(t *testing.T) {
+	tests := []struct {
+		input     string
+		wantKey   string
+		wantValue string
+		wantOK    bool
+	}{
+		{"server=web-1", "server", "web-1", true},
+		{"env=production", "env", "production", true},
+		{"bad", "", "", false},
+		{"=nokey", "", "", false},
+		{"novalue=", "", "", false},
+	}
+	for _, tt := range tests {
+		k, v, ok := parseTag(tt.input)
+		if ok != tt.wantOK || k != tt.wantKey || v != tt.wantValue {
+			t.Errorf("parseTag(%q) = (%q, %q, %v), want (%q, %q, %v)",
+				tt.input, k, v, ok, tt.wantKey, tt.wantValue, tt.wantOK)
+		}
+	}
+}
