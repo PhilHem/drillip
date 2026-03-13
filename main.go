@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 )
 
 // Config holds all environment-based configuration.
@@ -66,17 +69,34 @@ func runServe(cfg Config) {
 	if err := initDB(cfg.DB); err != nil {
 		log.Fatalf("init db: %v", err)
 	}
-	defer db.Close()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handleHealth)
 	mux.HandleFunc("/api/", handleIngest)
 	mux.HandleFunc("/-/healthy", handleHealth)
+	mux.HandleFunc("/api/0/top/", handleAPITop)
+	mux.HandleFunc("/api/0/show/", handleAPIShow)
+	mux.HandleFunc("/api/0/stats/", handleAPIStats)
+
+	srv := &http.Server{Addr: cfg.Addr, Handler: mux}
+
+	// Graceful shutdown: checkpoint WAL and close DB
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-stop
+		log.Println("shutting down...")
+		_ = srv.Shutdown(context.Background())
+	}()
 
 	log.Printf("drillip listening on %s (db: %s)", cfg.Addr, cfg.DB)
-	if err := http.ListenAndServe(cfg.Addr, mux); err != nil {
+	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
+
+	_, _ = db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	log.Println("WAL checkpoint complete")
+	db.Close()
 }
 
 func main() {

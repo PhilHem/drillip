@@ -234,7 +234,7 @@ func TestOccurrenceInsertion(t *testing.T) {
 		},
 	}
 
-	if err := storeEvent(&event); err != nil {
+	if _, err := storeEvent(&event); err != nil {
 		t.Fatalf("store: %v", err)
 	}
 
@@ -247,7 +247,7 @@ func TestOccurrenceInsertion(t *testing.T) {
 	}
 
 	// Send again — should get 2 occurrences
-	if err := storeEvent(&event); err != nil {
+	if _, err := storeEvent(&event); err != nil {
 		t.Fatalf("store: %v", err)
 	}
 	if err := db.QueryRow("SELECT COUNT(*) FROM occurrences").Scan(&occCount); err != nil {
@@ -315,7 +315,7 @@ func TestOccurrenceTraceID(t *testing.T) {
 		},
 	}
 
-	if err := storeEvent(&event); err != nil {
+	if _, err := storeEvent(&event); err != nil {
 		t.Fatalf("store: %v", err)
 	}
 
@@ -426,6 +426,166 @@ func TestExplicitLevelOverride(t *testing.T) {
 	}}
 	if got := ev.EffectiveLevel(); got != "fatal" {
 		t.Fatalf("expected fatal, got %q", got)
+	}
+}
+
+func TestIngestReturnsFingerprint(t *testing.T) {
+	setupTestDB(t)
+
+	body := []byte(`{"event_id":"fp-test","level":"error","message":"test fingerprint return"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/1/store/", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	handleIngest(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var resp map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("parse response: %v", err)
+	}
+	fp, ok := resp["id"]
+	if !ok || fp == "" || fp == "ok" {
+		t.Fatalf("expected fingerprint in response, got %q", fp)
+	}
+
+	// Verify the returned fingerprint matches what's in the DB
+	var count int
+	if err := db.QueryRow("SELECT count FROM errors WHERE fingerprint = ?", fp).Scan(&count); err != nil {
+		t.Fatalf("fingerprint %q not found in DB: %v", fp, err)
+	}
+}
+
+func TestAPITop(t *testing.T) {
+	setupTestDB(t)
+
+	event := Event{
+		Exception: &ExceptionData{
+			Values: []ExceptionValue{{
+				Type: "APITestError", Value: "api test",
+				Stacktrace: &Stacktrace{Frames: []Frame{{Filename: "a.go", Function: "f", Lineno: 1}}},
+			}},
+		},
+		Tags: map[string]string{"server": "web-1"},
+	}
+	if _, err := storeEvent(&event); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/0/top/", nil)
+	w := httptest.NewRecorder()
+	handleAPITop(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var results []apiError
+	if err := json.Unmarshal(w.Body.Bytes(), &results); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(results) != 1 || results[0].Type != "APITestError" {
+		t.Fatalf("unexpected results: %+v", results)
+	}
+}
+
+func TestAPITopWithTagFilter(t *testing.T) {
+	setupTestDB(t)
+
+	ev1 := Event{
+		Exception: &ExceptionData{Values: []ExceptionValue{{Type: "Err1", Value: "v1",
+			Stacktrace: &Stacktrace{Frames: []Frame{{Filename: "a.go", Function: "f", Lineno: 1}}}}}},
+		Tags: map[string]string{"server": "web-1"},
+	}
+	ev2 := Event{
+		Exception: &ExceptionData{Values: []ExceptionValue{{Type: "Err2", Value: "v2",
+			Stacktrace: &Stacktrace{Frames: []Frame{{Filename: "b.go", Function: "g", Lineno: 2}}}}}},
+		Tags: map[string]string{"server": "web-2"},
+	}
+	if _, err := storeEvent(&ev1); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	if _, err := storeEvent(&ev2); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/0/top/?tag=server%3Dweb-1", nil)
+	w := httptest.NewRecorder()
+	handleAPITop(w, req)
+
+	var results []apiError
+	if err := json.Unmarshal(w.Body.Bytes(), &results); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(results) != 1 || results[0].Type != "Err1" {
+		t.Fatalf("expected only Err1, got %+v", results)
+	}
+}
+
+func TestAPIShow(t *testing.T) {
+	setupTestDB(t)
+
+	event := Event{
+		Exception: &ExceptionData{Values: []ExceptionValue{{Type: "ShowAPIErr", Value: "show api",
+			Stacktrace: &Stacktrace{Frames: []Frame{{Filename: "s.go", Function: "h", Lineno: 5}}}}}},
+	}
+	fp, err := storeEvent(&event)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/0/show/"+fp[:8]+"/", nil)
+	w := httptest.NewRecorder()
+	handleAPIShow(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var detail apiErrorDetail
+	if err := json.Unmarshal(w.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if detail.Type != "ShowAPIErr" {
+		t.Fatalf("expected ShowAPIErr, got %q", detail.Type)
+	}
+}
+
+func TestAPIShowNotFound(t *testing.T) {
+	setupTestDB(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/0/show/nonexistent/", nil)
+	w := httptest.NewRecorder()
+	handleAPIShow(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestAPIStats(t *testing.T) {
+	setupTestDB(t)
+
+	event := Event{
+		Exception: &ExceptionData{Values: []ExceptionValue{{Type: "StatsErr", Value: "stats",
+			Stacktrace: &Stacktrace{Frames: []Frame{{Filename: "s.go", Function: "f", Lineno: 1}}}}}},
+	}
+	if _, err := storeEvent(&event); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/0/stats/", nil)
+	w := httptest.NewRecorder()
+	handleAPIStats(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var s apiStats
+	if err := json.Unmarshal(w.Body.Bytes(), &s); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if s.UniqueErrors != 1 {
+		t.Fatalf("expected 1 unique error, got %d", s.UniqueErrors)
+	}
+	if s.TotalOccurrences != 1 {
+		t.Fatalf("expected 1 occurrence, got %d", s.TotalOccurrences)
 	}
 }
 

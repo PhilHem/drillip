@@ -48,7 +48,7 @@ func readBody(r *http.Request) ([]byte, error) {
 	return io.ReadAll(reader)
 }
 
-func storeEvent(ev *Event) error {
+func storeEvent(ev *Event) (string, error) {
 	fp := fingerprint(ev)
 	now := time.Now().UTC().Format(time.RFC3339)
 	level := ev.EffectiveLevel()
@@ -85,7 +85,7 @@ func storeEvent(ev *Event) error {
 
 	tx, err := db.Begin()
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -103,16 +103,16 @@ func storeEvent(ev *Event) error {
 		ev.Release, ev.Environment, userJSON, tagsJSON, ev.Platform, now, now,
 		now, breadcrumbsJSON, userJSON, ev.Release)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	_, err = tx.Exec(`INSERT INTO occurrences (fingerprint, timestamp, release_tag, trace_id, tags) VALUES (?,?,?,?,?)`,
 		fp, now, ev.Release, ev.TraceID(), tagsJSON)
 	if err != nil {
-		return err
+		return "", err
 	}
 
-	return tx.Commit()
+	return fp, tx.Commit()
 }
 
 func handleIngest(w http.ResponseWriter, r *http.Request) {
@@ -148,14 +148,16 @@ func handleIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := storeEvent(event); err != nil {
+	fp, err := storeEvent(event)
+	if err != nil {
 		log.Printf("store event: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write([]byte(`{"id":"ok"}`))
+	resp, _ := json.Marshal(map[string]string{"id": fp})
+	_, _ = w.Write(resp)
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
