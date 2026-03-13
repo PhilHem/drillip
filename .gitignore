@@ -3,3 +3,4 @@ errors.db-wal
 errors.db-shm
 drillip
 *.exe
+error-sink

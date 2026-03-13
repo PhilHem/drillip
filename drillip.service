@@ -1,0 +1,27 @@
+# /etc/systemd/system/drillip.service
+[Unit]
+Description=Drillip (Sentry SDK compatible error receiver)
+After=network.target
+
+[Service]
+Type=exec
+ExecStart=/usr/local/bin/drillip serve
+ExecStartPost=/bin/sh -c 'for i in 1 2 3 4 5; do /usr/local/bin/drillip health && exit 0; sleep 1; done; exit 1'
+Restart=always
+RestartSec=5
+
+Environment=DRILLIP_DB=/var/lib/drillip/errors.db
+Environment=DRILLIP_ADDR=127.0.0.1:8301
+
+DynamicUser=yes
+StateDirectory=drillip
+ReadWritePaths=/var/lib/drillip
+
+ProtectSystem=strict
+ProtectHome=yes
+NoNewPrivileges=yes
+PrivateTmp=yes
+MemoryMax=64M
+
+[Install]
+WantedBy=multi-user.target
