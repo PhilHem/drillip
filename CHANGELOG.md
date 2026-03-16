@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.3.3 - 2026-03-16
+
+### Added
+
+- Correlate API endpoint (`GET /api/0/correlate/<fp>/`) — assembles stacktrace, logs, metrics, traces, and profiles in one JSON response
+- Auto-GC prunes occurrences older than `DRILLIP_RETAIN` (default 90d) alongside the hourly auto-resolve cycle
+- Configurable log level via `DRILLIP_LOG_LEVEL` (debug/info/warn/error) — debug mode logs every ingested event
+- CI workflow with tests, race detector, vet, and govulncheck on every push
+- Dependabot for Go modules and GitHub Actions
+- Security regression test suite
+- README
+- Branch protection requiring CI to pass
+
+### Changed
+
+- Stale deployment files removed from project root, moved to `deploy/`
+- Dependencies updated: `modernc.org/sqlite` 1.46.2, `actions/checkout` v6, `docker/build-push-action` v7, `docker/login-action` v4, `docker/metadata-action` v6
+
 ## v0.3.2 - 2026-03-16
 
 ### Fixed
