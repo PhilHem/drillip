@@ -118,6 +118,12 @@ func MakeHandler(s *store.Store, notifier *notify.Notifier) http.HandlerFunc {
 			return
 		}
 
+		evType := "message"
+		if event.Exception != nil && len(event.Exception.Values) > 0 {
+			evType = event.Exception.Values[0].Type
+		}
+		slog.Debug("event stored", "fingerprint", result.Fingerprint, "type", evType, "new", result.IsNew, "regression", result.IsRegression)
+
 		if (result.IsNew || result.IsRegression) && notifier != nil {
 			go notifier.NotifyNewError(event, result.Fingerprint, result.IsRegression, result.ResolvedDuration)
 		}

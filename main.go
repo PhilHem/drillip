@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -233,7 +234,23 @@ func runServe(cfg Config) {
 	s.Close()
 }
 
+func initLogger() {
+	level := slog.LevelInfo
+	if v := os.Getenv("DRILLIP_LOG_LEVEL"); v != "" {
+		switch strings.ToLower(v) {
+		case "debug":
+			level = slog.LevelDebug
+		case "warn", "warning":
+			level = slog.LevelWarn
+		case "error":
+			level = slog.LevelError
+		}
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
+}
+
 func main() {
+	initLogger()
 	cfg := loadConfig()
 
 	// Parse global flags before subcommand
