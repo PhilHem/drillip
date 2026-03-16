@@ -45,23 +45,37 @@ type Notifier struct {
 	SMTP     SMTPConfig
 	Project  string
 	Cooldown time.Duration
-	Store    *store.Store // for silence checks
+	Digest   time.Duration // batch window; 0 means send immediately
+	Store    *store.Store  // for silence checks
 
 	mu       sync.Mutex
 	lastSent time.Time
 	recent   map[string]time.Time // fingerprint -> last notified
+	pending  []pendingNotification
+	timer    *time.Timer
 
 	// now and sendMail are injectable for testing.
 	now      func() time.Time
 	sendMail func(addr string, a smtp.Auth, from string, to []string, msg []byte) error
 }
 
-// NewNotifier creates a Notifier with the given SMTP config, project name, cooldown duration, and store.
-func NewNotifier(smtpCfg SMTPConfig, project string, cooldown time.Duration, st *store.Store) *Notifier {
+// pendingNotification holds a buffered notification awaiting digest flush.
+type pendingNotification struct {
+	Event       *domain.Event
+	Fingerprint string
+	IsRegression bool
+	ResolvedFor time.Duration
+}
+
+// NewNotifier creates a Notifier with the given SMTP config, project name,
+// cooldown duration, digest window, and store.
+// A zero digest duration means notifications are sent immediately (no batching).
+func NewNotifier(smtpCfg SMTPConfig, project string, cooldown, digest time.Duration, st *store.Store) *Notifier {
 	return &Notifier{
 		SMTP:     smtpCfg,
 		Project:  project,
 		Cooldown: cooldown,
+		Digest:   digest,
 		Store:    st,
 		recent:   make(map[string]time.Time),
 	}
@@ -109,7 +123,8 @@ func (n *Notifier) shouldNotify(fp string) bool {
 
 // NotifyNewError sends an email for a newly seen or regressed error, subject to cooldown.
 // When regression is true, the email uses amber styling and includes resolvedFor duration.
-// Safe to call from a goroutine.
+// If digest batching is enabled, the notification is buffered and sent when the digest
+// window expires. Safe to call from a goroutine.
 func (n *Notifier) NotifyNewError(ev *domain.Event, fp string, regression bool, resolvedFor time.Duration) {
 	if !n.SMTP.Enabled() {
 		return
@@ -122,37 +137,52 @@ func (n *Notifier) NotifyNewError(ev *domain.Event, fp string, regression bool, 
 
 	n.mu.Lock()
 	ok := n.shouldNotify(fp)
-	n.mu.Unlock()
-
 	if !ok {
+		n.mu.Unlock()
 		log.Printf("notify: throttled notification for fingerprint %s", fp)
 		return
 	}
 
-	evType, _ := extractException(ev)
-	if regression {
-		subject := fmt.Sprintf("[drillip] regression: %s", evType)
-		htmlBody := formatHTMLEmail(ev, fp, n.Project, true, resolvedFor)
-		textBody := formatPlainEmail(ev, fp, n.Project, true, resolvedFor)
-		msg := buildMultipartMIME(n.SMTP.From, n.SMTP.To, subject, textBody, htmlBody)
-
-		var auth smtp.Auth
-		if n.SMTP.User != "" {
-			auth = smtp.PlainAuth("", n.SMTP.User, n.SMTP.Pass, n.SMTP.Host)
-		}
-		send := smtp.SendMail
-		if n.sendMail != nil {
-			send = n.sendMail
-		}
-		if err := send(n.SMTP.Addr(), auth, n.SMTP.From, []string{n.SMTP.To}, msg); err != nil {
-			log.Printf("notify: send mail: %v", err)
-		}
+	if n.Digest <= 0 {
+		n.mu.Unlock()
+		n.sendIndividual(ev, fp, regression, resolvedFor)
 		return
 	}
 
-	subject := fmt.Sprintf("[drillip] %s: %s", ev.EffectiveLevel(), evType)
-	htmlBody := formatHTMLEmail(ev, fp, n.Project, false, 0)
-	textBody := formatPlainEmail(ev, fp, n.Project, false, 0)
+	// Digest mode: buffer the notification
+	n.pending = append(n.pending, pendingNotification{
+		Event:       ev,
+		Fingerprint: fp,
+		IsRegression: regression,
+		ResolvedFor: resolvedFor,
+	})
+	if len(n.pending) == 1 {
+		// First item — start digest timer
+		n.timer = time.AfterFunc(n.Digest, n.flush)
+	}
+	n.mu.Unlock()
+}
+
+// sendIndividual sends a single notification email (non-digest path).
+func (n *Notifier) sendIndividual(ev *domain.Event, fp string, regression bool, resolvedFor time.Duration) {
+	evType, _ := extractException(ev)
+	var subject, htmlBody, textBody string
+
+	if regression {
+		subject = fmt.Sprintf("[drillip] regression: %s", evType)
+		htmlBody = formatHTMLEmail(ev, fp, n.Project, true, resolvedFor)
+		textBody = formatPlainEmail(ev, fp, n.Project, true, resolvedFor)
+	} else {
+		subject = fmt.Sprintf("[drillip] %s: %s", ev.EffectiveLevel(), evType)
+		htmlBody = formatHTMLEmail(ev, fp, n.Project, false, 0)
+		textBody = formatPlainEmail(ev, fp, n.Project, false, 0)
+	}
+
+	n.send(subject, textBody, htmlBody)
+}
+
+// send transmits an email via SMTP.
+func (n *Notifier) send(subject, textBody, htmlBody string) {
 	msg := buildMultipartMIME(n.SMTP.From, n.SMTP.To, subject, textBody, htmlBody)
 
 	var auth smtp.Auth
@@ -160,14 +190,177 @@ func (n *Notifier) NotifyNewError(ev *domain.Event, fp string, regression bool, 
 		auth = smtp.PlainAuth("", n.SMTP.User, n.SMTP.Pass, n.SMTP.Host)
 	}
 
-	send := smtp.SendMail
+	sendFn := smtp.SendMail
 	if n.sendMail != nil {
-		send = n.sendMail
+		sendFn = n.sendMail
 	}
 
-	if err := send(n.SMTP.Addr(), auth, n.SMTP.From, []string{n.SMTP.To}, msg); err != nil {
+	if err := sendFn(n.SMTP.Addr(), auth, n.SMTP.From, []string{n.SMTP.To}, msg); err != nil {
 		log.Printf("notify: send mail: %v", err)
 	}
+}
+
+// flush sends all pending notifications as a digest (or individual if only one).
+func (n *Notifier) flush() {
+	n.mu.Lock()
+	items := n.pending
+	n.pending = nil
+	n.mu.Unlock()
+
+	if len(items) == 0 {
+		return
+	}
+
+	if len(items) == 1 {
+		p := items[0]
+		n.sendIndividual(p.Event, p.Fingerprint, p.IsRegression, p.ResolvedFor)
+		return
+	}
+
+	subject := fmt.Sprintf("[drillip] %d new errors in %s", len(items), n.Project)
+	htmlBody := formatDigestHTMLEmail(items, n.Project)
+	textBody := formatDigestPlainEmail(items)
+	n.send(subject, textBody, htmlBody)
+}
+
+// Close stops any pending digest timer and flushes buffered notifications.
+// Call this during graceful shutdown.
+func (n *Notifier) Close() {
+	n.mu.Lock()
+	if n.timer != nil {
+		n.timer.Stop()
+	}
+	n.mu.Unlock()
+	n.flush()
+}
+
+// --- Digest email formats ---
+
+func formatDigestHTMLEmail(items []pendingNotification, project string) string {
+	var b strings.Builder
+
+	// Document start + outer table
+	b.WriteString(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>`)
+	b.WriteString(`<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background-color:#f5f5f5;">`)
+	b.WriteString(`<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#f5f5f5;padding:20px 0;"><tr><td align="center">`)
+	b.WriteString(`<table role="presentation" width="600" cellspacing="0" cellpadding="0" style="background-color:#ffffff;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">`)
+
+	// Project bar
+	b.WriteString(`<tr><td style="background-color:#f1f5f9;padding:12px 40px;border-radius:8px 8px 0 0;border-bottom:1px solid #e2e8f0;">`)
+	b.WriteString(`<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>`)
+	b.WriteString(`<td><span style="color:#1e293b;font-size:13px;font-weight:600;">drillip</span>`)
+	if project != "" {
+		b.WriteString(fmt.Sprintf(`<span style="color:#94a3b8;font-size:13px;">&nbsp;&middot;&nbsp;%s</span>`, html.EscapeString(project)))
+	}
+	b.WriteString(`</td></tr></table></td></tr>`)
+
+	// Header — green gradient for digest
+	b.WriteString(`<tr><td style="background:linear-gradient(135deg,#059669 0%,#047857 100%);padding:24px 40px;">`)
+	b.WriteString(`<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>`)
+	b.WriteString(fmt.Sprintf(`<td><p style="margin:0;color:rgba(255,255,255,0.8);font-size:13px;text-transform:uppercase;letter-spacing:0.5px;">Digest</p><p style="margin:8px 0 0 0;color:#ffffff;font-size:20px;font-weight:600;">%d new errors</p></td>`, len(items)))
+	b.WriteString(`</tr></table></td></tr>`)
+
+	// Error table
+	b.WriteString(`<tr><td style="padding:32px 40px;">`)
+	b.WriteString(`<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;">`)
+
+	// Table header
+	b.WriteString(`<tr style="background-color:#f8fafc;">`)
+	b.WriteString(`<td style="padding:8px 12px;color:#64748b;font-size:12px;font-weight:600;">Level</td>`)
+	b.WriteString(`<td style="padding:8px 12px;color:#64748b;font-size:12px;font-weight:600;">Type</td>`)
+	b.WriteString(`<td style="padding:8px 12px;color:#64748b;font-size:12px;font-weight:600;">Value</td>`)
+	b.WriteString(`<td style="padding:8px 12px;color:#64748b;font-size:12px;font-weight:600;">Fingerprint</td>`)
+	b.WriteString(`</tr>`)
+
+	// One row per error
+	for _, p := range items {
+		evType, evValue := extractException(p.Event)
+		level := p.Event.EffectiveLevel()
+		fpShort := p.Fingerprint
+		if len(fpShort) > 8 {
+			fpShort = fpShort[:8]
+		}
+
+		// Truncate long values
+		if len(evValue) > 50 {
+			evValue = evValue[:47] + "..."
+		}
+
+		// Row background: amber for regressions, white otherwise
+		rowBg := "#ffffff"
+		if p.IsRegression {
+			rowBg = "#fffbeb"
+		}
+
+		// Level badge colors
+		badgeBg, badgeColor := "#fee2e2", "#991b1b" // error default
+		if level == "warning" {
+			badgeBg, badgeColor = "#fef3c7", "#92400e"
+		} else if level == "info" {
+			badgeBg, badgeColor = "#dbeafe", "#1e40af"
+		}
+		if p.IsRegression {
+			badgeBg, badgeColor = "#fef3c7", "#92400e"
+		}
+
+		levelLabel := level
+		if p.IsRegression {
+			levelLabel = "regression"
+		}
+
+		b.WriteString(fmt.Sprintf(`<tr style="background-color:%s;">`, rowBg))
+		b.WriteString(fmt.Sprintf(`<td style="padding:10px 12px;border-top:1px solid #e2e8f0;"><span style="display:inline-block;padding:2px 8px;background-color:%s;color:%s;font-size:11px;border-radius:3px;font-weight:500;">%s</span></td>`, badgeBg, badgeColor, html.EscapeString(levelLabel)))
+		b.WriteString(fmt.Sprintf(`<td style="padding:10px 12px;border-top:1px solid #e2e8f0;color:#1e293b;font-size:13px;font-weight:600;font-family:'SF Mono',Monaco,'Courier New',monospace;">%s</td>`, html.EscapeString(evType)))
+		b.WriteString(fmt.Sprintf(`<td style="padding:10px 12px;border-top:1px solid #e2e8f0;color:#475569;font-size:13px;">%s</td>`, html.EscapeString(evValue)))
+		b.WriteString(fmt.Sprintf(`<td style="padding:10px 12px;border-top:1px solid #e2e8f0;font-family:'SF Mono',Monaco,'Courier New',monospace;font-size:12px;color:#64748b;">%s</td>`, html.EscapeString(fpShort)))
+		b.WriteString(`</tr>`)
+	}
+
+	b.WriteString(`</table></td></tr>`)
+
+	// CLI hint
+	b.WriteString(`<tr><td style="padding:0 40px 32px 40px;">`)
+	b.WriteString(`<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;">`)
+	b.WriteString(`<tr><td style="padding:16px 20px;"><p style="margin:0 0 8px 0;color:#0369a1;font-size:13px;font-weight:600;">Investigate</p><p style="margin:0 0 4px 0;color:#1e293b;font-size:13px;font-family:'SF Mono',Monaco,'Courier New',monospace;">drillip top</p><p style="margin:0;color:#1e293b;font-size:13px;font-family:'SF Mono',Monaco,'Courier New',monospace;">drillip recent</p></td></tr>`)
+	b.WriteString(`</table></td></tr>`)
+
+	// Footer
+	b.WriteString(`<tr><td style="padding:20px 40px;background-color:#f8fafc;border-top:1px solid #e2e8f0;border-radius:0 0 8px 8px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td style="color:#94a3b8;font-size:12px;">drillip error tracking</td></tr></table></td></tr>`)
+
+	// Close tables
+	b.WriteString(`</table></td></tr></table></body></html>`)
+
+	return b.String()
+}
+
+func formatDigestPlainEmail(items []pendingNotification) string {
+	var b strings.Builder
+
+	b.WriteString(fmt.Sprintf("DIGEST: %d new errors\n\n", len(items)))
+
+	for i, p := range items {
+		evType, evValue := extractException(p.Event)
+		level := p.Event.EffectiveLevel()
+		fpShort := p.Fingerprint
+		if len(fpShort) > 8 {
+			fpShort = fpShort[:8]
+		}
+
+		if p.IsRegression {
+			line := fmt.Sprintf("%d. [regression] %s: %s (fp: %s", i+1, evType, evValue, fpShort)
+			if p.ResolvedFor > 0 {
+				line += fmt.Sprintf(", was resolved for %s", formatDuration(p.ResolvedFor))
+			}
+			line += ")\n"
+			b.WriteString(line)
+		} else {
+			b.WriteString(fmt.Sprintf("%d. [%s] %s: %s (fp: %s)\n", i+1, level, evType, evValue, fpShort))
+		}
+	}
+
+	b.WriteString("\n---\nInvestigate:\n  drillip top\n  drillip recent\n")
+
+	return b.String()
 }
 
 func extractException(ev *domain.Event) (evType, evValue string) {

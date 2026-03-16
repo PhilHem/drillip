@@ -336,7 +336,7 @@ func TestIngestReturnsFingerprint(t *testing.T) {
 func TestRegressionTriggersNotification(t *testing.T) {
 	s := setupStore(t)
 
-	n := notify.NewNotifier(notify.SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, nil)
+	n := notify.NewNotifier(notify.SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, nil)
 	var notified int32
 	n.SetSendMail(func(_ string, _ smtp.Auth, _ string, _ []string, _ []byte) error {
 		atomic.AddInt32(&notified, 1)

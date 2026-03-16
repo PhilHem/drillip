@@ -225,13 +225,13 @@ func TestBuildMultipartMIME(t *testing.T) {
 
 func TestNotifyNoopWhenDisabled(t *testing.T) {
 	ev := &domain.Event{Message: "test"}
-	n := NewNotifier(SMTPConfig{}, "", 0, nil)
+	n := NewNotifier(SMTPConfig{}, "", 0, 0, nil)
 	// Should not panic or send when SMTP is disabled
 	n.NotifyNewError(ev, "abc123", false, 0)
 }
 
 func TestNewNotifierZeroCooldownSendsImmediately(t *testing.T) {
-	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, nil)
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, nil)
 	calls := 0
 	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
 		calls++
@@ -247,7 +247,7 @@ func TestNewNotifierZeroCooldownSendsImmediately(t *testing.T) {
 
 func TestSameFingerPrintThrottled(t *testing.T) {
 	now := time.Now()
-	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 10*time.Second, nil)
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 10*time.Second, 0, nil)
 	n.now = func() time.Time { return now }
 	calls := 0
 	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
@@ -266,7 +266,7 @@ func TestSameFingerPrintThrottled(t *testing.T) {
 
 func TestSameFingerPrintSendsAfterCooldown(t *testing.T) {
 	now := time.Now()
-	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 10*time.Second, nil)
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 10*time.Second, 0, nil)
 	n.now = func() time.Time { return now }
 	calls := 0
 	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
@@ -288,7 +288,7 @@ func TestSameFingerPrintSendsAfterCooldown(t *testing.T) {
 
 func TestDifferentFingerprintsThrottledByGlobalCooldown(t *testing.T) {
 	now := time.Now()
-	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 10*time.Second, nil)
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 10*time.Second, 0, nil)
 	n.now = func() time.Time { return now }
 	calls := 0
 	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
@@ -307,7 +307,7 @@ func TestDifferentFingerprintsThrottledByGlobalCooldown(t *testing.T) {
 
 func TestShouldNotifyPrunesOldEntries(t *testing.T) {
 	now := time.Now()
-	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 10*time.Second, nil)
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 10*time.Second, 0, nil)
 	n.now = func() time.Time { return now }
 
 	// Manually populate recent map with stale entries
@@ -482,7 +482,7 @@ func TestFormatPlainEmailNoRegression(t *testing.T) {
 }
 
 func TestNotifyRegressionSubject(t *testing.T) {
-	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, nil)
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, nil)
 	var captured []byte
 	n.sendMail = func(_ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
 		captured = msg
@@ -504,7 +504,7 @@ func TestNotifyRegressionSubject(t *testing.T) {
 }
 
 func TestNotifyNewErrorSubject(t *testing.T) {
-	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, nil)
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, nil)
 	var captured []byte
 	n.sendMail = func(_ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
 		captured = msg
@@ -552,7 +552,7 @@ func TestSilencedFingerprintSkipsNotification(t *testing.T) {
 	}
 	t.Cleanup(func() { s.Close() })
 
-	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, s)
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, s)
 	calls := 0
 	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
 		calls++
@@ -579,7 +579,7 @@ func TestNonSilencedFingerprintSendsNotification(t *testing.T) {
 	}
 	t.Cleanup(func() { s.Close() })
 
-	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, s)
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, s)
 	calls := 0
 	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
 		calls++
@@ -591,5 +591,288 @@ func TestNonSilencedFingerprintSendsNotification(t *testing.T) {
 
 	if calls != 1 {
 		t.Fatalf("expected 1 send for non-silenced fingerprint, got %d", calls)
+	}
+}
+
+// --- Digest tests ---
+
+func TestDigestZeroSendsImmediately(t *testing.T) {
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, nil)
+	calls := 0
+	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
+		calls++
+		return nil
+	}
+	ev := &domain.Event{Message: "test"}
+	n.NotifyNewError(ev, "fp1", false, 0)
+	n.NotifyNewError(ev, "fp2", false, 0)
+	if calls != 2 {
+		t.Fatalf("expected 2 immediate sends with digest=0, got %d", calls)
+	}
+}
+
+func TestDigestBatchesMultipleErrors(t *testing.T) {
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 5*time.Minute, nil)
+	calls := 0
+	var captured []byte
+	n.sendMail = func(_ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
+		calls++
+		captured = msg
+		return nil
+	}
+
+	ev1 := &domain.Event{
+		Exception: &domain.ExceptionData{
+			Values: []domain.ExceptionValue{{Type: "ValueError", Value: "bad input"}},
+		},
+	}
+	ev2 := &domain.Event{
+		Exception: &domain.ExceptionData{
+			Values: []domain.ExceptionValue{{Type: "IOError", Value: "connection refused"}},
+		},
+	}
+	ev3 := &domain.Event{
+		Exception: &domain.ExceptionData{
+			Values: []domain.ExceptionValue{{Type: "TimeoutError", Value: "request timeout"}},
+		},
+	}
+
+	n.NotifyNewError(ev1, "fp100001abcdef00", false, 0)
+	n.NotifyNewError(ev2, "fp200002abcdef00", false, 0)
+	n.NotifyNewError(ev3, "fp300003abcdef00", true, 48*time.Hour)
+
+	// No email sent yet — buffered
+	if calls != 0 {
+		t.Fatalf("expected 0 sends while buffered, got %d", calls)
+	}
+
+	// Manually flush
+	n.flush()
+
+	if calls != 1 {
+		t.Fatalf("expected 1 digest send after flush, got %d", calls)
+	}
+
+	msg := string(captured)
+	if !strings.Contains(msg, "Subject: [drillip] 3 new errors in proj") {
+		t.Errorf("missing digest subject, got:\n%s", msg[:min(len(msg), 400)])
+	}
+}
+
+func TestDigestSingleItemSendsIndividualEmail(t *testing.T) {
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 5*time.Minute, nil)
+	calls := 0
+	var captured []byte
+	n.sendMail = func(_ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
+		calls++
+		captured = msg
+		return nil
+	}
+
+	ev := &domain.Event{
+		Exception: &domain.ExceptionData{
+			Values: []domain.ExceptionValue{{Type: "ValueError", Value: "bad"}},
+		},
+	}
+
+	n.NotifyNewError(ev, "fp100001abcdef00", false, 0)
+
+	// Flush with single pending item -> should send individual email, not digest
+	n.flush()
+
+	if calls != 1 {
+		t.Fatalf("expected 1 send, got %d", calls)
+	}
+
+	msg := string(captured)
+	// Individual email subject, not digest
+	if !strings.Contains(msg, "Subject: [drillip] error: ValueError") {
+		t.Errorf("expected individual subject, got:\n%s", msg[:min(len(msg), 400)])
+	}
+	if strings.Contains(msg, "DIGEST") {
+		t.Error("single item should not use digest format")
+	}
+}
+
+func TestFlushClearsPending(t *testing.T) {
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 5*time.Minute, nil)
+	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error { return nil }
+
+	ev := &domain.Event{Message: "test"}
+	n.NotifyNewError(ev, "fp1", false, 0)
+	n.NotifyNewError(ev, "fp2", false, 0)
+
+	n.flush()
+
+	n.mu.Lock()
+	pending := len(n.pending)
+	n.mu.Unlock()
+
+	if pending != 0 {
+		t.Fatalf("expected 0 pending after flush, got %d", pending)
+	}
+
+	// Second flush should not send
+	calls := 0
+	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
+		calls++
+		return nil
+	}
+	n.flush()
+	if calls != 0 {
+		t.Fatalf("expected 0 sends on second flush, got %d", calls)
+	}
+}
+
+func TestCloseFlushes(t *testing.T) {
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 5*time.Minute, nil)
+	calls := 0
+	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
+		calls++
+		return nil
+	}
+
+	ev := &domain.Event{Message: "test"}
+	n.NotifyNewError(ev, "fp1", false, 0)
+	n.NotifyNewError(ev, "fp2", false, 0)
+
+	n.Close()
+
+	if calls != 1 {
+		t.Fatalf("expected 1 digest send from Close, got %d", calls)
+	}
+}
+
+func TestDigestHTMLContainsAllErrors(t *testing.T) {
+	items := []pendingNotification{
+		{
+			Event: &domain.Event{
+				Level: "error",
+				Exception: &domain.ExceptionData{
+					Values: []domain.ExceptionValue{{Type: "ValueError", Value: "invalid input"}},
+				},
+			},
+			Fingerprint: "04827c09abcdef00",
+			IsRegression: false,
+		},
+		{
+			Event: &domain.Event{
+				Level: "error",
+				Exception: &domain.ExceptionData{
+					Values: []domain.ExceptionValue{{Type: "IOError", Value: "connection refused"}},
+				},
+			},
+			Fingerprint: "a3b1e7f2abcdef00",
+			IsRegression: false,
+		},
+		{
+			Event: &domain.Event{
+				Level: "error",
+				Exception: &domain.ExceptionData{
+					Values: []domain.ExceptionValue{{Type: "TimeoutError", Value: "request timeout"}},
+				},
+			},
+			Fingerprint: "9c4d5e6fabcdef00",
+			IsRegression: true,
+			ResolvedFor: 48 * time.Hour,
+		},
+	}
+
+	html := formatDigestHTMLEmail(items, "myproject")
+
+	for _, want := range []string{
+		"Digest",
+		"3 new errors",
+		"#059669",          // green gradient
+		"#047857",          // green gradient end
+		"ValueError",
+		"invalid input",
+		"04827c09",
+		"IOError",
+		"connection refused",
+		"a3b1e7f2",
+		"TimeoutError",
+		"request timeout",
+		"9c4d5e6f",
+		"regression",       // regression label
+		"#fffbeb",          // amber background for regression row
+		"drillip top",
+		"drillip recent",
+		"myproject",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("digest HTML missing %q", want)
+		}
+	}
+}
+
+func TestDigestPlainTextFormat(t *testing.T) {
+	items := []pendingNotification{
+		{
+			Event: &domain.Event{
+				Level: "error",
+				Exception: &domain.ExceptionData{
+					Values: []domain.ExceptionValue{{Type: "ValueError", Value: "invalid input"}},
+				},
+			},
+			Fingerprint: "04827c09abcdef00",
+			IsRegression: false,
+		},
+		{
+			Event: &domain.Event{
+				Level: "error",
+				Exception: &domain.ExceptionData{
+					Values: []domain.ExceptionValue{{Type: "IOError", Value: "connection refused"}},
+				},
+			},
+			Fingerprint: "a3b1e7f2abcdef00",
+			IsRegression: false,
+		},
+		{
+			Event: &domain.Event{
+				Level: "error",
+				Exception: &domain.ExceptionData{
+					Values: []domain.ExceptionValue{{Type: "TimeoutError", Value: "request timeout"}},
+				},
+			},
+			Fingerprint: "9c4d5e6fabcdef00",
+			IsRegression: true,
+			ResolvedFor: 48 * time.Hour,
+		},
+	}
+
+	text := formatDigestPlainEmail(items)
+
+	for _, want := range []string{
+		"DIGEST: 3 new errors",
+		"1. [error] ValueError: invalid input (fp: 04827c09)",
+		"2. [error] IOError: connection refused (fp: a3b1e7f2)",
+		"3. [regression] TimeoutError: request timeout (fp: 9c4d5e6f, was resolved for 2 days)",
+		"drillip top",
+		"drillip recent",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("digest plain text missing %q\ngot:\n%s", want, text)
+		}
+	}
+}
+
+func TestDigestTimerFires(t *testing.T) {
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 10*time.Millisecond, nil)
+	calls := make(chan int, 1)
+	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
+		calls <- 1
+		return nil
+	}
+
+	ev := &domain.Event{Message: "test"}
+	n.NotifyNewError(ev, "fp1", false, 0)
+
+	// Wait for timer to fire
+	select {
+	case <-calls:
+		// ok
+	case <-time.After(1 * time.Second):
+		t.Fatal("digest timer did not fire within 1 second")
 	}
 }

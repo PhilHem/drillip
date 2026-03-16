@@ -28,6 +28,7 @@ type Config struct {
 	Project      string // project name for notifications
 	SMTP         notify.SMTPConfig
 	SMTPCooldown time.Duration
+	SMTPDigest   time.Duration
 	ResolveAfter time.Duration
 	Integrations integrations.Config
 }
@@ -83,6 +84,12 @@ func loadConfig() Config {
 	if v := os.Getenv("DRILLIP_SMTP_COOLDOWN"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			cfg.SMTPCooldown = d
+		}
+	}
+	cfg.SMTPDigest = 5 * time.Minute // default
+	if v := os.Getenv("DRILLIP_SMTP_DIGEST"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.SMTPDigest = d
 		}
 	}
 	cfg.ResolveAfter = 24 * time.Hour // default
@@ -141,8 +148,8 @@ func runServe(cfg Config) {
 
 	var notifier *notify.Notifier
 	if cfg.SMTP.Enabled() {
-		notifier = notify.NewNotifier(cfg.SMTP, cfg.Project, cfg.SMTPCooldown, s)
-		log.Printf("email notifications enabled (to: %s via %s, cooldown: %s)", cfg.SMTP.To, cfg.SMTP.Addr(), cfg.SMTPCooldown)
+		notifier = notify.NewNotifier(cfg.SMTP, cfg.Project, cfg.SMTPCooldown, cfg.SMTPDigest, s)
+		log.Printf("email notifications enabled (to: %s via %s, cooldown: %s, digest: %s)", cfg.SMTP.To, cfg.SMTP.Addr(), cfg.SMTPCooldown, cfg.SMTPDigest)
 	}
 
 	apiHandler := &api.Handler{DB: s.DB, Store: s}
@@ -205,6 +212,9 @@ func runServe(cfg Config) {
 		log.Fatal(err)
 	}
 
+	if notifier != nil {
+		notifier.Close()
+	}
 	_ = s.Checkpoint()
 	log.Println("WAL checkpoint complete")
 	s.Close()
