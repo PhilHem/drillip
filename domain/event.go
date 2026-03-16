@@ -113,6 +113,12 @@ var validLevels = map[string]bool{
 	"debug":   true,
 }
 
+// stripCRLF removes carriage return and newline characters from strings
+// to prevent header injection when values are used in email subjects or logs.
+func stripCRLF(s string) string {
+	return strings.NewReplacer("\r", "", "\n", "").Replace(s)
+}
+
 // Sanitize clamps oversized fields in-place so the event is safe to store.
 // It truncates rather than rejecting — Sentry SDKs send real data and we
 // should accept it gracefully.
@@ -130,6 +136,8 @@ func (e *Event) Sanitize() {
 			e.Exception.Values = e.Exception.Values[:10]
 		}
 		for i := range e.Exception.Values {
+			e.Exception.Values[i].Type = stripCRLF(e.Exception.Values[i].Type)
+			e.Exception.Values[i].Value = stripCRLF(e.Exception.Values[i].Value)
 			if len(e.Exception.Values[i].Type) > 200 {
 				e.Exception.Values[i].Type = e.Exception.Values[i].Type[:200]
 			}
