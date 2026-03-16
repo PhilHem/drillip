@@ -105,8 +105,8 @@ func MakeHandler(s *store.Store, notifier *notify.Notifier) http.HandlerFunc {
 			return
 		}
 
-		if result.IsNew && notifier != nil {
-			go notifier.NotifyNewError(event, result.Fingerprint)
+		if (result.IsNew || result.IsRegression) && notifier != nil {
+			go notifier.NotifyNewError(event, result.Fingerprint, result.IsRegression, result.ResolvedDuration)
 		}
 
 		w.Header().Set("Content-Type", "application/json")

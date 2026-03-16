@@ -276,3 +276,61 @@ func TestRegressionDetection(t *testing.T) {
 		t.Fatal("expected resolved_at to be cleared after regression")
 	}
 }
+
+func TestRegressionResolvedDuration(t *testing.T) {
+	s := setupStore(t)
+
+	event := domain.Event{
+		Exception: &domain.ExceptionData{
+			Values: []domain.ExceptionValue{{
+				Type: "DurationErr", Value: "check duration",
+				Stacktrace: &domain.Stacktrace{Frames: []domain.Frame{{Filename: "d.go", Function: "f", Lineno: 1}}},
+			}},
+		},
+	}
+
+	// Store and resolve
+	result, err := s.StoreEvent(&event)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	// Resolve and backdate resolved_at to 3 hours ago
+	resolvedTime := time.Now().UTC().Add(-3 * time.Hour).Format(time.RFC3339)
+	if _, err := s.DB.Exec("UPDATE errors SET resolved_at = ? WHERE fingerprint = ?", resolvedTime, result.Fingerprint); err != nil {
+		t.Fatalf("backdate resolved_at: %v", err)
+	}
+
+	// Store again — should be a regression with duration ~3 hours
+	result, err = s.StoreEvent(&event)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	if !result.IsRegression {
+		t.Fatal("expected regression")
+	}
+	if result.ResolvedDuration < 2*time.Hour || result.ResolvedDuration > 4*time.Hour {
+		t.Fatalf("expected ResolvedDuration ~3h, got %v", result.ResolvedDuration)
+	}
+}
+
+func TestNoResolvedDurationForNewError(t *testing.T) {
+	s := setupStore(t)
+
+	event := domain.Event{
+		Exception: &domain.ExceptionData{
+			Values: []domain.ExceptionValue{{
+				Type: "FreshErr", Value: "brand new",
+				Stacktrace: &domain.Stacktrace{Frames: []domain.Frame{{Filename: "f.go", Function: "f", Lineno: 1}}},
+			}},
+		},
+	}
+
+	result, err := s.StoreEvent(&event)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	if result.ResolvedDuration != 0 {
+		t.Fatalf("expected zero ResolvedDuration for new error, got %v", result.ResolvedDuration)
+	}
+}

@@ -136,9 +136,10 @@ func (s *Store) columnExists(table, column string) bool {
 
 // StoreResult holds the outcome of storing an event.
 type StoreResult struct {
-	Fingerprint  string
-	IsNew        bool
-	IsRegression bool // was resolved, now reappeared
+	Fingerprint      string
+	IsNew            bool
+	IsRegression     bool          // was resolved, now reappeared
+	ResolvedDuration time.Duration // how long it was resolved before regressing
 }
 
 // StoreEvent persists a domain event into the database.
@@ -185,6 +186,7 @@ func (s *Store) StoreEvent(ev *domain.Event) (StoreResult, error) {
 
 	// Check if this fingerprint already exists and whether it was resolved
 	var isNew, isRegression bool
+	var resolvedDuration time.Duration
 	var existingResolvedAt sql.NullString
 	err = tx.QueryRow("SELECT resolved_at FROM errors WHERE fingerprint = ?", fp).Scan(&existingResolvedAt)
 	if err == sql.ErrNoRows {
@@ -193,6 +195,9 @@ func (s *Store) StoreEvent(ev *domain.Event) (StoreResult, error) {
 		return StoreResult{}, err
 	} else if existingResolvedAt.Valid && existingResolvedAt.String != "" {
 		isRegression = true
+		if t, parseErr := time.Parse(time.RFC3339, existingResolvedAt.String); parseErr == nil {
+			resolvedDuration = time.Since(t)
+		}
 	}
 
 	_, err = tx.Exec(`
@@ -219,7 +224,7 @@ func (s *Store) StoreEvent(ev *domain.Event) (StoreResult, error) {
 		return StoreResult{}, err
 	}
 
-	return StoreResult{Fingerprint: fp, IsNew: isNew, IsRegression: isRegression}, tx.Commit()
+	return StoreResult{Fingerprint: fp, IsNew: isNew, IsRegression: isRegression, ResolvedDuration: resolvedDuration}, tx.Commit()
 }
 
 // AutoResolve marks errors as resolved if they haven't been seen within olderThan.

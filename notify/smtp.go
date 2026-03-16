@@ -64,6 +64,11 @@ func NewNotifier(smtp SMTPConfig, project string, cooldown time.Duration) *Notif
 	}
 }
 
+// SetSendMail overrides the function used to send emails. Intended for testing.
+func (n *Notifier) SetSendMail(fn func(addr string, a smtp.Auth, from string, to []string, msg []byte) error) {
+	n.sendMail = fn
+}
+
 // shouldNotify checks whether the notifier should send for the given fingerprint
 // and updates internal state accordingly. It returns true if sending is allowed.
 // Must be called with n.mu held.
@@ -99,9 +104,10 @@ func (n *Notifier) shouldNotify(fp string) bool {
 	return true
 }
 
-// NotifyNewError sends an email for a newly seen error, subject to cooldown.
+// NotifyNewError sends an email for a newly seen or regressed error, subject to cooldown.
+// When regression is true, the email uses amber styling and includes resolvedFor duration.
 // Safe to call from a goroutine.
-func (n *Notifier) NotifyNewError(ev *domain.Event, fp string) {
+func (n *Notifier) NotifyNewError(ev *domain.Event, fp string, regression bool, resolvedFor time.Duration) {
 	if !n.SMTP.Enabled() {
 		return
 	}
@@ -116,10 +122,29 @@ func (n *Notifier) NotifyNewError(ev *domain.Event, fp string) {
 	}
 
 	evType, _ := extractException(ev)
-	subject := fmt.Sprintf("[drillip] %s: %s", ev.EffectiveLevel(), evType)
+	if regression {
+		subject := fmt.Sprintf("[drillip] regression: %s", evType)
+		htmlBody := formatHTMLEmail(ev, fp, n.Project, true, resolvedFor)
+		textBody := formatPlainEmail(ev, fp, n.Project, true, resolvedFor)
+		msg := buildMultipartMIME(n.SMTP.From, n.SMTP.To, subject, textBody, htmlBody)
 
-	htmlBody := formatHTMLEmail(ev, fp, n.Project)
-	textBody := formatPlainEmail(ev, fp, n.Project)
+		var auth smtp.Auth
+		if n.SMTP.User != "" {
+			auth = smtp.PlainAuth("", n.SMTP.User, n.SMTP.Pass, n.SMTP.Host)
+		}
+		send := smtp.SendMail
+		if n.sendMail != nil {
+			send = n.sendMail
+		}
+		if err := send(n.SMTP.Addr(), auth, n.SMTP.From, []string{n.SMTP.To}, msg); err != nil {
+			log.Printf("notify: send mail: %v", err)
+		}
+		return
+	}
+
+	subject := fmt.Sprintf("[drillip] %s: %s", ev.EffectiveLevel(), evType)
+	htmlBody := formatHTMLEmail(ev, fp, n.Project, false, 0)
+	textBody := formatPlainEmail(ev, fp, n.Project, false, 0)
 	msg := buildMultipartMIME(n.SMTP.From, n.SMTP.To, subject, textBody, htmlBody)
 
 	var auth smtp.Auth
@@ -146,13 +171,25 @@ func extractException(ev *domain.Event) (evType, evValue string) {
 
 // --- HTML email ---
 
-func formatHTMLEmail(ev *domain.Event, fp, project string) string {
+func formatHTMLEmail(ev *domain.Event, fp, project string, isRegression bool, resolvedFor time.Duration) string {
 	evType, evValue := extractException(ev)
 	level := ev.EffectiveLevel()
 	now := time.Now().UTC().Format("January 2, 2006, 3:04:05 p.m. UTC")
 	fpShort := fp
 	if len(fpShort) > 8 {
 		fpShort = fpShort[:8]
+	}
+
+	// Choose colors based on regression vs new
+	headerGradient := `linear-gradient(135deg,#e74c3c 0%%,#c0392b 100%%)`
+	headerLabel := "New Issue"
+	exceptionBg := "#fef2f2"
+	exceptionBorder := "#e74c3c"
+	if isRegression {
+		headerGradient = `linear-gradient(135deg,#f59e0b 0%%,#d97706 100%%)`
+		headerLabel = "Regression"
+		exceptionBg = "#fffbeb"
+		exceptionBorder = "#f59e0b"
 	}
 
 	var b strings.Builder
@@ -177,9 +214,9 @@ func formatHTMLEmail(ev *domain.Event, fp, project string) string {
 	b.WriteString(`</tr></table></td></tr>`)
 
 	// Header
-	b.WriteString(`<tr><td style="background:linear-gradient(135deg,#e74c3c 0%%,#c0392b 100%%);padding:24px 40px;">`)
+	b.WriteString(fmt.Sprintf(`<tr><td style="background:%s;padding:24px 40px;">`, headerGradient))
 	b.WriteString(`<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>`)
-	b.WriteString(fmt.Sprintf(`<td><p style="margin:0;color:rgba(255,255,255,0.8);font-size:13px;text-transform:uppercase;letter-spacing:0.5px;">New Issue</p><p style="margin:8px 0 0 0;color:#ffffff;font-size:20px;font-weight:600;">%s</p></td>`, html.EscapeString(evType)))
+	b.WriteString(fmt.Sprintf(`<td><p style="margin:0;color:rgba(255,255,255,0.8);font-size:13px;text-transform:uppercase;letter-spacing:0.5px;">%s</p><p style="margin:8px 0 0 0;color:#ffffff;font-size:20px;font-weight:600;">%s</p></td>`, headerLabel, html.EscapeString(evType)))
 	b.WriteString(fmt.Sprintf(`<td align="right" style="vertical-align:top;"><span style="display:inline-block;padding:4px 12px;border-radius:12px;background-color:rgba(255,255,255,0.2);color:#fff;font-size:12px;font-weight:500;">%s</span></td>`, html.EscapeString(level)))
 	b.WriteString(`</tr></table></td></tr>`)
 
@@ -188,7 +225,14 @@ func formatHTMLEmail(ev *domain.Event, fp, project string) string {
 
 	// Exception
 	b.WriteString(sectionLabel("Exception"))
-	b.WriteString(fmt.Sprintf(`<table role="presentation" width="100%%" cellspacing="0" cellpadding="0" style="margin-bottom:28px;"><tr><td style="padding:16px 20px;background-color:#fef2f2;border-left:3px solid #e74c3c;border-radius:0 6px 6px 0;"><p style="margin:0;color:#1e293b;font-size:15px;font-weight:600;font-family:'SF Mono',Monaco,'Courier New',monospace;">%s</p><p style="margin:6px 0 0 0;color:#475569;font-size:14px;line-height:1.5;">%s</p></td></tr></table>`, html.EscapeString(evType), html.EscapeString(evValue)))
+	b.WriteString(fmt.Sprintf(`<table role="presentation" width="100%%" cellspacing="0" cellpadding="0" style="margin-bottom:28px;"><tr><td style="padding:16px 20px;background-color:%s;border-left:3px solid %s;border-radius:0 6px 6px 0;"><p style="margin:0;color:#1e293b;font-size:15px;font-weight:600;font-family:'SF Mono',Monaco,'Courier New',monospace;">%s</p><p style="margin:6px 0 0 0;color:#475569;font-size:14px;line-height:1.5;">%s</p>`, exceptionBg, exceptionBorder, html.EscapeString(evType), html.EscapeString(evValue)))
+
+	// Regression resolved-for line
+	if isRegression && resolvedFor > 0 {
+		b.WriteString(fmt.Sprintf(`<p style="margin:8px 0 0 0;color:#92400e;font-size:13px;font-style:italic;">This error was resolved for %s before reappearing.</p>`, formatDuration(resolvedFor)))
+	}
+
+	b.WriteString(`</td></tr></table>`)
 
 	// Stacktrace
 	if ev.Exception != nil && len(ev.Exception.Values) > 0 {
@@ -447,7 +491,29 @@ func formatBreadcrumbTime(ts string) string {
 
 // --- Plain text fallback ---
 
-func formatPlainEmail(ev *domain.Event, fp, project string) string {
+// formatDuration returns a human-readable duration string.
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%d seconds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%d minutes", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		h := int(d.Hours())
+		if h == 1 {
+			return "1 hour"
+		}
+		return fmt.Sprintf("%d hours", h)
+	}
+	days := int(d.Hours() / 24)
+	if days == 1 {
+		return "1 day"
+	}
+	return fmt.Sprintf("%d days", days)
+}
+
+func formatPlainEmail(ev *domain.Event, fp, project string, isRegression bool, resolvedFor time.Duration) string {
 	evType, evValue := extractException(ev)
 	level := ev.EffectiveLevel()
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -457,6 +523,14 @@ func formatPlainEmail(ev *domain.Event, fp, project string) string {
 	}
 
 	var b strings.Builder
+
+	if isRegression {
+		if resolvedFor > 0 {
+			b.WriteString(fmt.Sprintf("STATUS: REGRESSION (was resolved for %s)\n\n", formatDuration(resolvedFor)))
+		} else {
+			b.WriteString("STATUS: REGRESSION\n\n")
+		}
+	}
 
 	if project != "" {
 		b.WriteString(fmt.Sprintf("Project: %s\n", project))

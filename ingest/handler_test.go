@@ -7,9 +7,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/smtp"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/PhilHem/drillip/domain"
+	"github.com/PhilHem/drillip/notify"
 	"github.com/PhilHem/drillip/store"
 	"github.com/andybalholm/brotli"
 )
@@ -326,5 +330,78 @@ func TestIngestReturnsFingerprint(t *testing.T) {
 	var count int
 	if err := s.DB.QueryRow("SELECT count FROM errors WHERE fingerprint = ?", fp).Scan(&count); err != nil {
 		t.Fatalf("fingerprint %q not found in DB: %v", fp, err)
+	}
+}
+
+func TestRegressionTriggersNotification(t *testing.T) {
+	s := setupStore(t)
+
+	n := notify.NewNotifier(notify.SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0)
+	var notified int32
+	n.SetSendMail(func(_ string, _ smtp.Auth, _ string, _ []string, _ []byte) error {
+		atomic.AddInt32(&notified, 1)
+		return nil
+	})
+
+	event := domain.Event{
+		EventID: "reg-test",
+		Exception: &domain.ExceptionData{
+			Values: []domain.ExceptionValue{{
+				Type:  "RegError",
+				Value: "regression test",
+				Stacktrace: &domain.Stacktrace{
+					Frames: []domain.Frame{{Filename: "r.go", Function: "f", Lineno: 1}},
+				},
+			}},
+		},
+	}
+
+	// First ingest — new error, should notify
+	body, _ := json.Marshal(event)
+	req := httptest.NewRequest(http.MethodPost, "/api/1/store/", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	MakeHandler(s, n)(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	// Wait briefly for the goroutine to complete
+	time.Sleep(50 * time.Millisecond)
+	if atomic.LoadInt32(&notified) != 1 {
+		t.Fatalf("expected 1 notification for new error, got %d", atomic.LoadInt32(&notified))
+	}
+
+	// Get fingerprint to resolve it
+	var fp string
+	if err := s.DB.QueryRow("SELECT fingerprint FROM errors WHERE type = 'RegError'").Scan(&fp); err != nil {
+		t.Fatalf("query fp: %v", err)
+	}
+	if _, err := s.Resolve(fp); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	// Second ingest — regression, should notify again
+	body, _ = json.Marshal(event)
+	req = httptest.NewRequest(http.MethodPost, "/api/1/store/", bytes.NewReader(body))
+	w = httptest.NewRecorder()
+	MakeHandler(s, n)(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	if atomic.LoadInt32(&notified) != 2 {
+		t.Fatalf("expected 2 notifications (new + regression), got %d", atomic.LoadInt32(&notified))
+	}
+
+	// Third ingest — neither new nor regression, should NOT notify
+	body, _ = json.Marshal(event)
+	req = httptest.NewRequest(http.MethodPost, "/api/1/store/", bytes.NewReader(body))
+	w = httptest.NewRecorder()
+	MakeHandler(s, n)(w, req)
+
+	time.Sleep(50 * time.Millisecond)
+	if atomic.LoadInt32(&notified) != 2 {
+		t.Fatalf("expected still 2 notifications (third ingest is neither new nor regression), got %d", atomic.LoadInt32(&notified))
 	}
 }

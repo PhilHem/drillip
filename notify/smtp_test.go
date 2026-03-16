@@ -77,7 +77,7 @@ func TestFormatHTMLEmailException(t *testing.T) {
 		},
 	}
 
-	body := formatHTMLEmail(ev, "abcdef1234567890", "entitlements")
+	body := formatHTMLEmail(ev, "abcdef1234567890", "entitlements", false, 0)
 
 	for _, want := range []string{
 		"New Issue",
@@ -115,7 +115,7 @@ func TestFormatHTMLEmailMessage(t *testing.T) {
 		Message: "deploy started",
 	}
 
-	body := formatHTMLEmail(ev, "1234567890abcdef", "")
+	body := formatHTMLEmail(ev, "1234567890abcdef", "", false, 0)
 	if !strings.Contains(body, "deploy started") {
 		t.Fatal("missing message value")
 	}
@@ -134,7 +134,7 @@ func TestFormatHTMLOmitsEmptySections(t *testing.T) {
 		Message: "simple error",
 	}
 
-	body := formatHTMLEmail(ev, "abcd1234abcd1234", "")
+	body := formatHTMLEmail(ev, "abcd1234abcd1234", "", false, 0)
 
 	if strings.Contains(body, "Stacktrace") {
 		t.Error("should not have Stacktrace section for message event")
@@ -177,7 +177,7 @@ func TestFormatPlainEmail(t *testing.T) {
 		Tags:    map[string]string{"env": "staging"},
 	}
 
-	body := formatPlainEmail(ev, "abcdef1234567890", "myproject")
+	body := formatPlainEmail(ev, "abcdef1234567890", "myproject", false, 0)
 
 	for _, want := range []string{
 		"Type:        RuntimeError",
@@ -226,7 +226,7 @@ func TestNotifyNoopWhenDisabled(t *testing.T) {
 	ev := &domain.Event{Message: "test"}
 	n := NewNotifier(SMTPConfig{}, "", 0)
 	// Should not panic or send when SMTP is disabled
-	n.NotifyNewError(ev, "abc123")
+	n.NotifyNewError(ev, "abc123", false, 0)
 }
 
 func TestNewNotifierZeroCooldownSendsImmediately(t *testing.T) {
@@ -237,8 +237,8 @@ func TestNewNotifierZeroCooldownSendsImmediately(t *testing.T) {
 		return nil
 	}
 	ev := &domain.Event{Message: "test"}
-	n.NotifyNewError(ev, "fp1")
-	n.NotifyNewError(ev, "fp1")
+	n.NotifyNewError(ev, "fp1", false, 0)
+	n.NotifyNewError(ev, "fp1", false, 0)
 	if calls != 2 {
 		t.Fatalf("expected 2 sends with zero cooldown, got %d", calls)
 	}
@@ -255,8 +255,8 @@ func TestSameFingerPrintThrottled(t *testing.T) {
 	}
 	ev := &domain.Event{Message: "test"}
 
-	n.NotifyNewError(ev, "fp1") // should send
-	n.NotifyNewError(ev, "fp1") // should be throttled (same fp, within cooldown)
+	n.NotifyNewError(ev, "fp1", false, 0) // should send
+	n.NotifyNewError(ev, "fp1", false, 0) // should be throttled (same fp, within cooldown)
 
 	if calls != 1 {
 		t.Fatalf("expected 1 send (second throttled), got %d", calls)
@@ -274,11 +274,11 @@ func TestSameFingerPrintSendsAfterCooldown(t *testing.T) {
 	}
 	ev := &domain.Event{Message: "test"}
 
-	n.NotifyNewError(ev, "fp1") // should send
+	n.NotifyNewError(ev, "fp1", false, 0) // should send
 
 	// Advance time past cooldown
 	now = now.Add(11 * time.Second)
-	n.NotifyNewError(ev, "fp1") // should send again
+	n.NotifyNewError(ev, "fp1", false, 0) // should send again
 
 	if calls != 2 {
 		t.Fatalf("expected 2 sends after cooldown expired, got %d", calls)
@@ -296,8 +296,8 @@ func TestDifferentFingerprintsThrottledByGlobalCooldown(t *testing.T) {
 	}
 	ev := &domain.Event{Message: "test"}
 
-	n.NotifyNewError(ev, "fp1") // should send
-	n.NotifyNewError(ev, "fp2") // different fp, but global cooldown blocks
+	n.NotifyNewError(ev, "fp1", false, 0) // should send
+	n.NotifyNewError(ev, "fp2", false, 0) // different fp, but global cooldown blocks
 
 	if calls != 1 {
 		t.Fatalf("expected 1 send (fp2 blocked by global cooldown), got %d", calls)
@@ -394,5 +394,152 @@ func TestExtractException(t *testing.T) {
 	typ, val = extractException(ev2)
 	if typ != "message" || val != "hello" {
 		t.Errorf("got %q %q", typ, val)
+	}
+}
+
+func TestFormatHTMLEmailRegression(t *testing.T) {
+	ev := &domain.Event{
+		EventID: "reg-123",
+		Level:   "error",
+		Exception: &domain.ExceptionData{
+			Values: []domain.ExceptionValue{{
+				Type:  "ValueError",
+				Value: "bad input",
+			}},
+		},
+	}
+
+	body := formatHTMLEmail(ev, "abcdef1234567890", "myproject", true, 72*time.Hour)
+
+	// Should have regression styling
+	for _, want := range []string{
+		"Regression",
+		"#f59e0b",  // amber border/gradient color
+		"#d97706",  // amber gradient end
+		"#fffbeb",  // amber exception background
+		"ValueError",
+		"bad input",
+		"resolved for 3 days",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("regression HTML missing %q", want)
+		}
+	}
+
+	// Should NOT have new-issue styling
+	if strings.Contains(body, "New Issue") {
+		t.Error("regression HTML should not contain 'New Issue'")
+	}
+}
+
+func TestFormatHTMLEmailNewIssueNoRegressionText(t *testing.T) {
+	ev := &domain.Event{
+		Level:   "error",
+		Message: "something broke",
+	}
+
+	body := formatHTMLEmail(ev, "abcdef1234567890", "", false, 0)
+
+	if strings.Contains(body, "Regression") {
+		t.Error("non-regression HTML should not contain 'Regression'")
+	}
+	if strings.Contains(body, "resolved for") {
+		t.Error("non-regression HTML should not contain 'resolved for'")
+	}
+	if !strings.Contains(body, "New Issue") {
+		t.Error("non-regression HTML should contain 'New Issue'")
+	}
+}
+
+func TestFormatPlainEmailRegression(t *testing.T) {
+	ev := &domain.Event{
+		Level:   "error",
+		Message: "bad thing",
+	}
+
+	body := formatPlainEmail(ev, "abcdef1234567890", "proj", true, 48*time.Hour)
+
+	if !strings.Contains(body, "STATUS: REGRESSION") {
+		t.Error("regression plain text missing STATUS line")
+	}
+	if !strings.Contains(body, "resolved for 2 days") {
+		t.Errorf("regression plain text missing duration; got:\n%s", body)
+	}
+}
+
+func TestFormatPlainEmailNoRegression(t *testing.T) {
+	ev := &domain.Event{
+		Level:   "error",
+		Message: "bad thing",
+	}
+
+	body := formatPlainEmail(ev, "abcdef1234567890", "proj", false, 0)
+
+	if strings.Contains(body, "REGRESSION") {
+		t.Error("non-regression plain text should not contain REGRESSION")
+	}
+}
+
+func TestNotifyRegressionSubject(t *testing.T) {
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0)
+	var captured []byte
+	n.sendMail = func(_ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
+		captured = msg
+		return nil
+	}
+
+	ev := &domain.Event{
+		Exception: &domain.ExceptionData{
+			Values: []domain.ExceptionValue{{Type: "TypeError", Value: "oops"}},
+		},
+	}
+
+	n.NotifyNewError(ev, "fp1", true, 24*time.Hour)
+
+	msg := string(captured)
+	if !strings.Contains(msg, "Subject: [drillip] regression: TypeError") {
+		t.Errorf("expected regression subject, got message:\n%s", msg[:min(len(msg), 300)])
+	}
+}
+
+func TestNotifyNewErrorSubject(t *testing.T) {
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0)
+	var captured []byte
+	n.sendMail = func(_ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
+		captured = msg
+		return nil
+	}
+
+	ev := &domain.Event{
+		Exception: &domain.ExceptionData{
+			Values: []domain.ExceptionValue{{Type: "TypeError", Value: "oops"}},
+		},
+	}
+
+	n.NotifyNewError(ev, "fp1", false, 0)
+
+	msg := string(captured)
+	if !strings.Contains(msg, "Subject: [drillip] error: TypeError") {
+		t.Errorf("expected normal subject, got message:\n%s", msg[:min(len(msg), 300)])
+	}
+}
+
+func TestFormatDuration(t *testing.T) {
+	tests := []struct {
+		d    time.Duration
+		want string
+	}{
+		{30 * time.Second, "30 seconds"},
+		{5 * time.Minute, "5 minutes"},
+		{1 * time.Hour, "1 hour"},
+		{3 * time.Hour, "3 hours"},
+		{24 * time.Hour, "1 day"},
+		{72 * time.Hour, "3 days"},
+	}
+	for _, tt := range tests {
+		got := formatDuration(tt.d)
+		if got != tt.want {
+			t.Errorf("formatDuration(%v) = %q, want %q", tt.d, got, tt.want)
+		}
 	}
 }
