@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.1 - 2026-03-16
+
+### Fixed
+
+- Events from sentry-sdk 2.54+ (Python/Django) are now accepted — Brotli-compressed envelopes (`Content-Encoding: br`) were previously rejected with 400
+
 ## v0.2.0 - 2026-03-14
 
 ### Added
