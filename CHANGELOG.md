@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.3.4 - 2026-03-17
+
+### Added
+
+- `DRILLIP_SMTP_SKIP_VERIFY=true` skips TLS certificate validation on SMTP connections, fixing email delivery in scratch containers where the CA bundle doesn't include university/DFN certificates (#24)
+- `POST /api/0/test-email/` sends a test email to verify SMTP configuration — returns success or the exact error
+
 ## v0.3.3 - 2026-03-16
 
 ### Added
