@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.2.2 - 2026-03-16
+
+### Added
+
+- Email notifications on new errors — when a previously unseen error is ingested, Drillip sends an email via SMTP. Configured with `DRILLIP_SMTP_HOST`, `DRILLIP_SMTP_PORT`, `DRILLIP_SMTP_FROM`, `DRILLIP_SMTP_TO`, and optional `DRILLIP_SMTP_USER`/`DRILLIP_SMTP_PASS`. Disabled when host or recipient is unset.
+
+### Changed
+
+- Configuration is now grouped by concern: integration settings (journalctl, VictoriaMetrics, VictoriaTraces, Pyroscope) are in their own struct rather than flat on the top-level config
+
 ## v0.2.1 - 2026-03-16
 
 ### Fixed
