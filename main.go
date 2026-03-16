@@ -30,6 +30,7 @@ type Config struct {
 	SMTPCooldown time.Duration
 	SMTPDigest   time.Duration
 	ResolveAfter time.Duration
+	RetainFor    time.Duration
 	Integrations integrations.Config
 }
 
@@ -102,6 +103,14 @@ func loadConfig() Config {
 			cfg.ResolveAfter = d
 		} else {
 			slog.Warn("invalid DRILLIP_RESOLVE_AFTER, using default", "value", v, "default", cfg.ResolveAfter)
+		}
+	}
+	cfg.RetainFor = 90 * 24 * time.Hour // default 90 days
+	if v := os.Getenv("DRILLIP_RETAIN"); v != "" {
+		if d, err := domain.ParseDuration(v); err == nil {
+			cfg.RetainFor = d
+		} else {
+			slog.Warn("invalid DRILLIP_RETAIN, using default", "value", v, "default", cfg.RetainFor)
 		}
 	}
 	return cfg
@@ -181,6 +190,15 @@ func runServe(cfg Config) {
 					slog.Error("prune silences error", "err", err)
 				} else if pruned > 0 {
 					slog.Info("pruned expired silences", "count", pruned)
+				}
+				if cfg.RetainFor > 0 {
+					threshold := time.Now().UTC().Add(-cfg.RetainFor)
+					deleted, err := s.GCOccurrences(threshold)
+					if err != nil {
+						slog.Error("gc occurrences failed", "error", err)
+					} else if deleted > 0 {
+						slog.Info("gc: pruned old occurrences", "deleted", deleted, "older_than", cfg.RetainFor)
+					}
 				}
 			case <-stopResolve:
 				return

@@ -576,6 +576,65 @@ func TestFindByPrefix(t *testing.T) {
 	}
 }
 
+func TestGCOccurrences(t *testing.T) {
+	s := setupStore(t)
+
+	event := domain.Event{
+		Exception: &domain.ExceptionData{
+			Values: []domain.ExceptionValue{{
+				Type: "GCTestErr", Value: "gc test",
+				Stacktrace: &domain.Stacktrace{Frames: []domain.Frame{{Filename: "gc.go", Function: "f", Lineno: 1}}},
+			}},
+		},
+	}
+
+	result, err := s.StoreEvent(&event)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	// Insert an old occurrence (100 days ago)
+	oldTime := time.Now().UTC().Add(-100 * 24 * time.Hour).Format(time.RFC3339)
+	if _, err := s.DB.Exec(`INSERT INTO occurrences (fingerprint, timestamp) VALUES (?, ?)`,
+		result.Fingerprint, oldTime); err != nil {
+		t.Fatalf("insert old: %v", err)
+	}
+
+	// Insert a recent occurrence (1 hour ago)
+	recentTime := time.Now().UTC().Add(-1 * time.Hour).Format(time.RFC3339)
+	if _, err := s.DB.Exec(`INSERT INTO occurrences (fingerprint, timestamp) VALUES (?, ?)`,
+		result.Fingerprint, recentTime); err != nil {
+		t.Fatalf("insert recent: %v", err)
+	}
+
+	// We now have 3 occurrences: 1 from StoreEvent (now), 1 old, 1 recent
+	var total int
+	if err := s.DB.QueryRow("SELECT COUNT(*) FROM occurrences").Scan(&total); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if total != 3 {
+		t.Fatalf("expected 3 occurrences before GC, got %d", total)
+	}
+
+	// GC with 90-day threshold — should delete only the old one
+	threshold := time.Now().UTC().Add(-90 * 24 * time.Hour)
+	deleted, err := s.GCOccurrences(threshold)
+	if err != nil {
+		t.Fatalf("gc: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("expected 1 deleted, got %d", deleted)
+	}
+
+	// Verify 2 remain
+	if err := s.DB.QueryRow("SELECT COUNT(*) FROM occurrences").Scan(&total); err != nil {
+		t.Fatalf("count after gc: %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("expected 2 occurrences after GC, got %d", total)
+	}
+}
+
 func TestFindByPrefixNotFound(t *testing.T) {
 	s := setupStore(t)
 

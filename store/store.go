@@ -252,6 +252,15 @@ func (s *Store) AutoResolve(olderThan time.Duration) (int64, error) {
 	return res.RowsAffected()
 }
 
+// GCOccurrences deletes occurrence rows older than the given threshold.
+func (s *Store) GCOccurrences(before time.Time) (int64, error) {
+	res, err := s.DB.Exec("DELETE FROM occurrences WHERE timestamp < ?", before.Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // SilenceEntry represents an active silence rule.
 type SilenceEntry struct {
 	Fingerprint string
