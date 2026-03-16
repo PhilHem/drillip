@@ -119,7 +119,7 @@ func TestAPIShow(t *testing.T) {
 func TestAPIShowNotFound(t *testing.T) {
 	s := setupStore(t)
 	h := &Handler{DB: s.DB, Store: s}
-	req := httptest.NewRequest(http.MethodGet, "/api/0/show/nonexistent/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/0/show/aabb001122334455/", nil)
 	w := httptest.NewRecorder()
 	h.HandleShow(w, req)
 	if w.Code != http.StatusNotFound {
@@ -336,7 +336,7 @@ func TestAPIResolve(t *testing.T) {
 func TestAPIResolveNotFound(t *testing.T) {
 	s := setupStore(t)
 	h := &Handler{DB: s.DB, Store: s}
-	req := httptest.NewRequest(http.MethodPost, "/api/0/resolve/nonexistent/", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/0/resolve/aabb001122334455/", nil)
 	w := httptest.NewRecorder()
 	h.HandleResolve(w, req)
 	if w.Code != http.StatusNotFound {
@@ -379,7 +379,7 @@ func TestAPISilencePermanent(t *testing.T) {
 	s := setupStore(t)
 	h := &Handler{DB: s.DB, Store: s}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/0/silence/perm123/", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/0/silence/aaa0001111/", nil)
 	w := httptest.NewRecorder()
 	h.HandleSilence(w, req)
 
@@ -387,7 +387,7 @@ func TestAPISilencePermanent(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	if !s.IsSilenced("perm123") {
+	if !s.IsSilenced("aaa0001111") {
 		t.Fatal("expected fingerprint to be silenced")
 	}
 }
@@ -397,9 +397,9 @@ func TestAPIUnsilenceDelete(t *testing.T) {
 	h := &Handler{DB: s.DB, Store: s}
 
 	// First silence it
-	_ = s.Silence("del123", nil, "")
+	_ = s.Silence("de1a23", nil, "")
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/0/silence/del123/", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/0/silence/de1a23/", nil)
 	w := httptest.NewRecorder()
 	h.HandleSilence(w, req)
 
@@ -407,7 +407,7 @@ func TestAPIUnsilenceDelete(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	if s.IsSilenced("del123") {
+	if s.IsSilenced("de1a23") {
 		t.Fatal("expected fingerprint to no longer be silenced")
 	}
 }

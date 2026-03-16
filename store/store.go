@@ -301,6 +301,9 @@ func (s *Store) ListSilences() ([]SilenceEntry, error) {
 		}
 		entries = append(entries, e)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return entries, nil
 }
 
@@ -403,6 +406,9 @@ func (s *Store) GetTagDistribution(fp string) map[string]TagDist {
 			}
 			dist[k][v]++
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil
 	}
 
 	if len(dist) == 0 {

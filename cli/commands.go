@@ -67,6 +67,10 @@ func (c *CLI) RunTop(args []string, w io.Writer) {
 			fp[:8], fmt.Sprintf("%d", count), lvl, state, typ, truncate(val, 50), timeAgo(t),
 		})
 	}
+	if err := rows.Err(); err != nil {
+		fmt.Fprintf(w, "error: %v\n", err)
+		return
+	}
 
 	if len(tableRows) == 0 {
 		fmt.Fprintln(w, "no errors recorded")
@@ -120,6 +124,10 @@ func (c *CLI) RunRecent(args []string, w io.Writer) {
 			fp[:8], fmt.Sprintf("%d", count), lvl, state, typ, truncate(val, 50), timeAgo(t),
 		})
 	}
+	if err := rows.Err(); err != nil {
+		fmt.Fprintf(w, "error: %v\n", err)
+		return
+	}
 
 	if len(tableRows) == 0 {
 		fmt.Fprintf(w, "no new errors in the last %d hour(s)\n", *hours)
@@ -137,6 +145,10 @@ func (c *CLI) RunShow(args []string, w io.Writer) {
 		return
 	}
 	fp := args[0]
+	if !domain.ValidFingerprint(fp) {
+		fmt.Fprintln(w, "invalid fingerprint: must be 1-16 hex characters")
+		return
+	}
 
 	fullFP, err := c.Store.FindByPrefix(fp)
 	if err != nil {
@@ -257,6 +269,10 @@ func (c *CLI) RunTrend(args []string, w io.Writer) {
 		return
 	}
 	fp := args[0]
+	if !domain.ValidFingerprint(fp) {
+		fmt.Fprintln(w, "invalid fingerprint: must be 1-16 hex characters")
+		return
+	}
 
 	// Resolve full fingerprint
 	fullFP, err := c.Store.FindByPrefix(fp)
@@ -295,6 +311,10 @@ func (c *CLI) RunTrend(args []string, w io.Writer) {
 		}
 		buckets = append(buckets, b)
 	}
+	if err := rows.Err(); err != nil {
+		fmt.Fprintf(w, "error: %v\n", err)
+		return
+	}
 
 	if len(buckets) == 0 {
 		fmt.Fprintf(w, "no occurrences in the last 24h for %s\n", fullFP[:8])
@@ -324,6 +344,10 @@ func (c *CLI) RunCorrelate(args []string, w io.Writer, cfg integrations.Config) 
 	fp := fs.Arg(0)
 	if fp == "" {
 		fmt.Fprintln(w, "usage: drillip correlate <fingerprint>")
+		return
+	}
+	if !domain.ValidFingerprint(fp) {
+		fmt.Fprintln(w, "invalid fingerprint: must be 1-16 hex characters")
 		return
 	}
 
@@ -463,6 +487,10 @@ func (c *CLI) RunReleases(args []string, w io.Writer) {
 		return
 	}
 	fp := args[0]
+	if !domain.ValidFingerprint(fp) {
+		fmt.Fprintln(w, "invalid fingerprint: must be 1-16 hex characters")
+		return
+	}
 
 	// Resolve full fingerprint
 	fullFP, err := c.Store.FindByPrefix(fp)
@@ -493,6 +521,10 @@ func (c *CLI) RunReleases(args []string, w io.Writer) {
 		tableRows = append(tableRows, []string{
 			release, fmt.Sprintf("%d", count), firstSeen, lastSeen,
 		})
+	}
+	if err := rows.Err(); err != nil {
+		fmt.Fprintf(w, "error: %v\n", err)
+		return
 	}
 
 	if len(tableRows) == 0 {
@@ -561,6 +593,10 @@ func (c *CLI) RunResolve(args []string, w io.Writer) {
 		return
 	}
 	fpPrefix := args[0]
+	if !domain.ValidFingerprint(fpPrefix) {
+		fmt.Fprintln(w, "invalid fingerprint: must be 1-16 hex characters")
+		return
+	}
 
 	result, err := c.Store.Resolve(fpPrefix)
 	if err != nil {
@@ -586,6 +622,10 @@ func (c *CLI) RunSilence(args []string, w io.Writer) {
 	}
 
 	fp := remaining[0]
+	if !domain.ValidFingerprint(fp) {
+		fmt.Fprintln(w, "invalid fingerprint: must be 1-16 hex characters")
+		return
+	}
 
 	var expiresAt *time.Time
 	if len(remaining) > 1 {
@@ -640,6 +680,10 @@ func (c *CLI) RunUnsilence(args []string, w io.Writer) {
 		return
 	}
 	fp := args[0]
+	if !domain.ValidFingerprint(fp) {
+		fmt.Fprintln(w, "invalid fingerprint: must be 1-16 hex characters")
+		return
+	}
 	if err := c.Store.Unsilence(fp); err != nil {
 		fmt.Fprintf(w, "error: %v\n", err)
 		return

@@ -46,6 +46,8 @@ func parseEnvelope(body []byte) (*domain.Event, error) {
 	return nil, fmt.Errorf("no event item in envelope")
 }
 
+const maxDecompressedSize = 10 << 20 // 10 MB
+
 func readBody(r *http.Request) ([]byte, error) {
 	var reader io.Reader = r.Body
 	switch r.Header.Get("Content-Encoding") {
@@ -59,7 +61,7 @@ func readBody(r *http.Request) ([]byte, error) {
 	case "br":
 		reader = brotli.NewReader(r.Body)
 	}
-	return io.ReadAll(reader)
+	return io.ReadAll(io.LimitReader(reader, maxDecompressedSize))
 }
 
 // writeError writes a structured JSON error response.

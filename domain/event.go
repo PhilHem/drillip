@@ -130,10 +130,41 @@ func (e *Event) Sanitize() {
 			e.Exception.Values = e.Exception.Values[:10]
 		}
 		for i := range e.Exception.Values {
-			st := e.Exception.Values[i].Stacktrace
-			if st != nil && len(st.Frames) > 100 {
-				st.Frames = st.Frames[:100]
+			if len(e.Exception.Values[i].Type) > 200 {
+				e.Exception.Values[i].Type = e.Exception.Values[i].Type[:200]
 			}
+			if len(e.Exception.Values[i].Value) > 5000 {
+				e.Exception.Values[i].Value = e.Exception.Values[i].Value[:5000]
+			}
+			st := e.Exception.Values[i].Stacktrace
+			if st != nil {
+				if len(st.Frames) > 100 {
+					st.Frames = st.Frames[:100]
+				}
+				for j := range st.Frames {
+					if len(st.Frames[j].Filename) > 500 {
+						st.Frames[j].Filename = st.Frames[j].Filename[:500]
+					}
+					if len(st.Frames[j].Function) > 200 {
+						st.Frames[j].Function = st.Frames[j].Function[:200]
+					}
+					if len(st.Frames[j].AbsPath) > 500 {
+						st.Frames[j].AbsPath = st.Frames[j].AbsPath[:500]
+					}
+					if len(st.Frames[j].Module) > 200 {
+						st.Frames[j].Module = st.Frames[j].Module[:200]
+					}
+				}
+			}
+		}
+	}
+
+	if e.LogEntry != nil {
+		if len(e.LogEntry.Formatted) > 10000 {
+			e.LogEntry.Formatted = e.LogEntry.Formatted[:10000]
+		}
+		if len(e.LogEntry.Message) > 10000 {
+			e.LogEntry.Message = e.LogEntry.Message[:10000]
 		}
 	}
 

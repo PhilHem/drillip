@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -99,8 +100,22 @@ func (h *Handler) HandleTop(w http.ResponseWriter, r *http.Request) {
 		e.State = domain.DeriveState(resolvedAt, firstSeen)
 		results = append(results, e)
 	}
+	if err := rows.Err(); err != nil {
+		slog.Error("HandleTop rows iteration", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
 
 	writeJSON(w, results)
+}
+
+// extractFingerprint extracts and validates a fingerprint from a URL path.
+func extractFingerprint(path, prefix string) (string, bool) {
+	fp := strings.TrimSuffix(strings.TrimPrefix(path, prefix), "/")
+	if fp == "" || !domain.ValidFingerprint(fp) {
+		return "", false
+	}
+	return fp, true
 }
 
 func (h *Handler) HandleShow(w http.ResponseWriter, r *http.Request) {
@@ -109,11 +124,9 @@ func (h *Handler) HandleShow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract fingerprint from path: /api/0/show/<fp>/
-	path := strings.TrimPrefix(r.URL.Path, "/api/0/show/")
-	fp := strings.TrimSuffix(path, "/")
-	if fp == "" {
-		writeError(w, http.StatusBadRequest, "missing fingerprint")
+	fp, ok := extractFingerprint(r.URL.Path, "/api/0/show/")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid fingerprint")
 		return
 	}
 
@@ -184,6 +197,9 @@ func (h *Handler) HandleRecent(w http.ResponseWriter, r *http.Request) {
 	hours := 1
 	if hStr := r.URL.Query().Get("hours"); hStr != "" {
 		if n, err := strconv.Atoi(hStr); err == nil && n > 0 {
+			if n > 8760 {
+				n = 8760
+			}
 			hours = n
 		}
 	}
@@ -222,6 +238,11 @@ func (h *Handler) HandleRecent(w http.ResponseWriter, r *http.Request) {
 		e.State = domain.DeriveState(resolvedAt, e.LastSeen)
 		results = append(results, e)
 	}
+	if err := rows.Err(); err != nil {
+		slog.Error("HandleRecent rows iteration", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
 
 	writeJSON(w, results)
 }
@@ -237,9 +258,9 @@ func (h *Handler) HandleTrend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fp := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/0/trend/"), "/")
-	if fp == "" {
-		writeError(w, http.StatusBadRequest, "missing fingerprint")
+	fp, ok := extractFingerprint(r.URL.Path, "/api/0/trend/")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid fingerprint")
 		return
 	}
 
@@ -270,6 +291,11 @@ func (h *Handler) HandleTrend(w http.ResponseWriter, r *http.Request) {
 		}
 		buckets = append(buckets, b)
 	}
+	if err := rows.Err(); err != nil {
+		slog.Error("HandleTrend rows iteration", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
 
 	writeJSON(w, map[string]interface{}{
 		"fingerprint": fullFP,
@@ -290,9 +316,9 @@ func (h *Handler) HandleReleases(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fp := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/0/releases/"), "/")
-	if fp == "" {
-		writeError(w, http.StatusBadRequest, "missing fingerprint")
+	fp, ok := extractFingerprint(r.URL.Path, "/api/0/releases/")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid fingerprint")
 		return
 	}
 
@@ -321,6 +347,11 @@ func (h *Handler) HandleReleases(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		releases = append(releases, rel)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Error("HandleReleases rows iteration", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
 	}
 
 	writeJSON(w, map[string]interface{}{
@@ -369,9 +400,9 @@ func (h *Handler) HandleResolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fp := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/0/resolve/"), "/")
-	if fp == "" {
-		writeError(w, http.StatusBadRequest, "missing fingerprint")
+	fp, ok := extractFingerprint(r.URL.Path, "/api/0/resolve/")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid fingerprint")
 		return
 	}
 
@@ -392,9 +423,9 @@ func (h *Handler) HandleResolve(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleSilence(w http.ResponseWriter, r *http.Request) {
-	fp := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/0/silence/"), "/")
-	if fp == "" {
-		writeError(w, http.StatusBadRequest, "missing fingerprint")
+	fp, ok := extractFingerprint(r.URL.Path, "/api/0/silence/")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid fingerprint")
 		return
 	}
 
@@ -411,6 +442,9 @@ func (h *Handler) HandleSilence(w http.ResponseWriter, r *http.Request) {
 			expiresAt = &t
 		}
 		reason := r.URL.Query().Get("reason")
+		if len(reason) > 500 {
+			reason = reason[:500]
+		}
 
 		if err := h.Store.Silence(fp, expiresAt, reason); err != nil {
 			writeError(w, http.StatusInternalServerError, "internal error")

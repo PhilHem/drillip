@@ -193,9 +193,12 @@ func runServe(cfg Config) {
 	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
 		<-stop
+		signal.Stop(stop)
 		slog.Info("shutting down")
 		close(stopResolve)
-		_ = srv.Shutdown(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
 	}()
 
 	slog.Info("drillip listening", "addr", cfg.Addr, "db", cfg.DB)

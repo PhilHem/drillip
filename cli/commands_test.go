@@ -176,7 +176,7 @@ func TestRunRecent(t *testing.T) {
 	s := setupStore(t)
 	c := &CLI{DB: s.DB, Store: s}
 	// Insert with current time — should appear in recent
-	insertTestError(t, s, "rrrr111122223333", "RecentErr", "just happened", "v2.0.0")
+	insertTestError(t, s, "aaab111122223333", "RecentErr", "just happened", "v2.0.0")
 
 	var buf bytes.Buffer
 	c.RunRecent(nil, &buf)
@@ -201,10 +201,10 @@ func TestRunRecentEmpty(t *testing.T) {
 func TestRunShow(t *testing.T) {
 	s := setupStore(t)
 	c := &CLI{DB: s.DB, Store: s}
-	insertTestError(t, s, "ssss111122223333", "ShowError", "show me", "v3.0.0")
+	insertTestError(t, s, "aaac111122223333", "ShowError", "show me", "v3.0.0")
 
 	var buf bytes.Buffer
-	c.RunShow([]string{"ssss"}, &buf) // prefix match
+	c.RunShow([]string{"aaac"}, &buf) // prefix match
 	out := buf.String()
 	if !strings.Contains(out, "ShowError") {
 		t.Fatalf("missing error type: %s", out)
@@ -227,7 +227,7 @@ func TestRunShowNotFound(t *testing.T) {
 	s := setupStore(t)
 	c := &CLI{DB: s.DB, Store: s}
 	var buf bytes.Buffer
-	c.RunShow([]string{"nonexistent"}, &buf)
+	c.RunShow([]string{"0000000000000000"}, &buf)
 	if !strings.Contains(buf.String(), "not found") {
 		t.Fatalf("expected not found: %s", buf.String())
 	}
@@ -247,7 +247,7 @@ func TestRunShowNoArgs(t *testing.T) {
 func TestRunTrend(t *testing.T) {
 	s := setupStore(t)
 	c := &CLI{DB: s.DB, Store: s}
-	fp := "tttt111122223333"
+	fp := "aaad111122223333"
 	insertTestError(t, s, fp, "TrendErr", "trending", "v1.0.0")
 
 	// Insert occurrences in the last hour
@@ -257,7 +257,7 @@ func TestRunTrend(t *testing.T) {
 	insertTestOccurrence(t, s, fp, "v1.0.0", "", now.Add(-20*time.Minute))
 
 	var buf bytes.Buffer
-	c.RunTrend([]string{"tttt"}, &buf)
+	c.RunTrend([]string{"aaad"}, &buf)
 	out := buf.String()
 	if !strings.Contains(out, "█") {
 		t.Fatalf("missing bar chart: %s", out)
@@ -268,7 +268,7 @@ func TestRunTrendNotFound(t *testing.T) {
 	s := setupStore(t)
 	c := &CLI{DB: s.DB, Store: s}
 	var buf bytes.Buffer
-	c.RunTrend([]string{"nonexistent"}, &buf)
+	c.RunTrend([]string{"0000000000000000"}, &buf)
 	if !strings.Contains(buf.String(), "not found") {
 		t.Fatalf("expected not found: %s", buf.String())
 	}
@@ -279,7 +279,7 @@ func TestRunTrendNotFound(t *testing.T) {
 func TestRunReleases(t *testing.T) {
 	s := setupStore(t)
 	c := &CLI{DB: s.DB, Store: s}
-	fp := "llll111122223333"
+	fp := "aaae111122223333"
 	insertTestError(t, s, fp, "RelErr", "release test", "v1.0.0")
 
 	now := time.Now().UTC()
@@ -288,7 +288,7 @@ func TestRunReleases(t *testing.T) {
 	insertTestOccurrence(t, s, fp, "v2.0.0", "", now)
 
 	var buf bytes.Buffer
-	c.RunReleases([]string{"llll"}, &buf)
+	c.RunReleases([]string{"aaae"}, &buf)
 	out := buf.String()
 	if !strings.Contains(out, "v1.0.0") || !strings.Contains(out, "v2.0.0") {
 		t.Fatalf("missing releases: %s", out)
@@ -300,7 +300,7 @@ func TestRunReleases(t *testing.T) {
 func TestRunGC(t *testing.T) {
 	s := setupStore(t)
 	c := &CLI{DB: s.DB, Store: s}
-	fp := "gggg111122223333"
+	fp := "aaaf111122223333"
 	insertTestError(t, s, fp, "GCErr", "old error", "v1.0.0")
 
 	// Insert an old occurrence
@@ -372,7 +372,7 @@ func TestRunCorrelateNotFound(t *testing.T) {
 	s := setupStore(t)
 	c := &CLI{DB: s.DB, Store: s}
 	var buf bytes.Buffer
-	c.RunCorrelate([]string{"nonexistent"}, &buf, integrations.Config{})
+	c.RunCorrelate([]string{"0000000000000000"}, &buf, integrations.Config{})
 	if !strings.Contains(buf.String(), "not found") {
 		t.Fatalf("expected not found: %s", buf.String())
 	}
@@ -383,8 +383,8 @@ func TestRunCorrelateNotFound(t *testing.T) {
 func TestRunTopWithTagFilter(t *testing.T) {
 	s := setupStore(t)
 	c := &CLI{DB: s.DB, Store: s}
-	insertTestErrorWithTags(t, s, "ttag111122223333", "TagErr1", "on web-1", "v1.0.0", `{"server":"web-1"}`)
-	insertTestErrorWithTags(t, s, "ttag222233334444", "TagErr2", "on web-2", "v1.0.0", `{"server":"web-2"}`)
+	insertTestErrorWithTags(t, s, "aab0111122223333", "TagErr1", "on web-1", "v1.0.0", `{"server":"web-1"}`)
+	insertTestErrorWithTags(t, s, "aab1222233334444", "TagErr2", "on web-2", "v1.0.0", `{"server":"web-2"}`)
 
 	var buf bytes.Buffer
 	c.RunTop([]string{"--tag", "server=web-1"}, &buf)
@@ -400,8 +400,8 @@ func TestRunTopWithTagFilter(t *testing.T) {
 func TestRunRecentWithTagFilter(t *testing.T) {
 	s := setupStore(t)
 	c := &CLI{DB: s.DB, Store: s}
-	insertTestErrorWithTags(t, s, "rtag111122223333", "RecentTag1", "tagged recent", "v1.0.0", `{"endpoint":"/api/orders"}`)
-	insertTestErrorWithTags(t, s, "rtag222233334444", "RecentTag2", "other recent", "v1.0.0", `{"endpoint":"/api/users"}`)
+	insertTestErrorWithTags(t, s, "aab2111122223333", "RecentTag1", "tagged recent", "v1.0.0", `{"endpoint":"/api/orders"}`)
+	insertTestErrorWithTags(t, s, "aab3222233334444", "RecentTag2", "other recent", "v1.0.0", `{"endpoint":"/api/users"}`)
 
 	var buf bytes.Buffer
 	c.RunRecent([]string{"--tag", "endpoint=/api/orders"}, &buf)
@@ -419,11 +419,11 @@ func TestRunRecentWithTagFilter(t *testing.T) {
 func TestRunResolve(t *testing.T) {
 	s := setupStore(t)
 	c := &CLI{DB: s.DB, Store: s}
-	fp := "rslv111122223333"
+	fp := "aab4111122223333"
 	insertTestError(t, s, fp, "ResolveErr", "needs resolving", "v1.0.0")
 
 	var buf bytes.Buffer
-	c.RunResolve([]string{"rslv"}, &buf)
+	c.RunResolve([]string{"aab4"}, &buf)
 	out := buf.String()
 	if !strings.Contains(out, "resolved 1") {
 		t.Fatalf("expected resolve confirmation: %s", out)
@@ -444,7 +444,7 @@ func TestRunResolveNotFound(t *testing.T) {
 	c := &CLI{DB: s.DB, Store: s}
 
 	var buf bytes.Buffer
-	c.RunResolve([]string{"nonexistent"}, &buf)
+	c.RunResolve([]string{"0000000000000000"}, &buf)
 	if !strings.Contains(buf.String(), "no unresolved") {
 		t.Fatalf("expected not found message: %s", buf.String())
 	}
@@ -464,7 +464,7 @@ func TestRunResolveNoArgs(t *testing.T) {
 func TestRunTopShowsState(t *testing.T) {
 	s := setupStore(t)
 	c := &CLI{DB: s.DB, Store: s}
-	insertTestError(t, s, "stat111122223333", "StateErr", "state test", "v1.0.0")
+	insertTestError(t, s, "aab5111122223333", "StateErr", "state test", "v1.0.0")
 
 	var buf bytes.Buffer
 	c.RunTop(nil, &buf)
@@ -497,13 +497,13 @@ func TestRunSilenceWithDuration(t *testing.T) {
 	c := &CLI{DB: s.DB, Store: s}
 
 	var buf bytes.Buffer
-	c.RunSilence([]string{"dur123", "2h"}, &buf)
+	c.RunSilence([]string{"d0a123", "2h"}, &buf)
 	out := buf.String()
-	if !strings.Contains(out, "silenced dur123 until") {
+	if !strings.Contains(out, "silenced d0a123 until") {
 		t.Fatalf("expected timed silence message: %s", out)
 	}
 
-	if !s.IsSilenced("dur123") {
+	if !s.IsSilenced("d0a123") {
 		t.Fatal("expected fingerprint to be silenced")
 	}
 }
@@ -513,16 +513,16 @@ func TestRunSilenceWithReason(t *testing.T) {
 	c := &CLI{DB: s.DB, Store: s}
 
 	var buf bytes.Buffer
-	c.RunSilence([]string{"--reason", "maintenance", "rsn123"}, &buf)
+	c.RunSilence([]string{"--reason", "maintenance", "a5b123"}, &buf)
 	out := buf.String()
-	if !strings.Contains(out, "silenced rsn123 permanently") {
+	if !strings.Contains(out, "silenced a5b123 permanently") {
 		t.Fatalf("expected permanent silence message: %s", out)
 	}
 
 	entries, _ := s.ListSilences()
 	found := false
 	for _, e := range entries {
-		if e.Fingerprint == "rsn123" && e.Reason == "maintenance" {
+		if e.Fingerprint == "a5b123" && e.Reason == "maintenance" {
 			found = true
 		}
 	}
@@ -546,12 +546,12 @@ func TestRunSilences(t *testing.T) {
 	s := setupStore(t)
 	c := &CLI{DB: s.DB, Store: s}
 
-	_ = s.Silence("sil111", nil, "test reason")
+	_ = s.Silence("a0e111", nil, "test reason")
 
 	var buf bytes.Buffer
 	c.RunSilences(nil, &buf)
 	out := buf.String()
-	if !strings.Contains(out, "sil111") {
+	if !strings.Contains(out, "a0e111") {
 		t.Fatalf("missing fingerprint in silences: %s", out)
 	}
 	if !strings.Contains(out, "test reason") {
@@ -574,15 +574,15 @@ func TestRunUnsilence(t *testing.T) {
 	s := setupStore(t)
 	c := &CLI{DB: s.DB, Store: s}
 
-	_ = s.Silence("unsil123", nil, "")
+	_ = s.Silence("a0b0c123", nil, "")
 
 	var buf bytes.Buffer
-	c.RunUnsilence([]string{"unsil123"}, &buf)
-	if !strings.Contains(buf.String(), "unsilenced unsil123") {
+	c.RunUnsilence([]string{"a0b0c123"}, &buf)
+	if !strings.Contains(buf.String(), "unsilenced a0b0c123") {
 		t.Fatalf("expected unsilence confirmation: %s", buf.String())
 	}
 
-	if s.IsSilenced("unsil123") {
+	if s.IsSilenced("a0b0c123") {
 		t.Fatal("expected fingerprint to no longer be silenced")
 	}
 }
@@ -601,7 +601,7 @@ func TestRunUnsilenceNoArgs(t *testing.T) {
 func TestShowTagDistribution(t *testing.T) {
 	s := setupStore(t)
 	c := &CLI{DB: s.DB, Store: s}
-	fp := "dist111122223333"
+	fp := "aab6111122223333"
 	insertTestErrorWithTags(t, s, fp, "DistErr", "distribution test", "v1.0.0", `{"server":"web-1"}`)
 
 	now := time.Now().UTC()
@@ -610,7 +610,7 @@ func TestShowTagDistribution(t *testing.T) {
 	insertTestOccurrenceWithTags(t, s, fp, "v1.0.0", "", `{"server":"web-2"}`, now.Add(-2*time.Minute))
 
 	var buf bytes.Buffer
-	c.RunShow([]string{"dist"}, &buf)
+	c.RunShow([]string{"aab6"}, &buf)
 	out := buf.String()
 	if !strings.Contains(out, "Tag Distribution") {
 		t.Fatalf("missing tag distribution section: %s", out)

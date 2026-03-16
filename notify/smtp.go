@@ -242,6 +242,7 @@ func (n *Notifier) Close() {
 	n.mu.Lock()
 	if n.timer != nil {
 		n.timer.Stop()
+		n.timer = nil
 	}
 	n.mu.Unlock()
 	n.flush()
