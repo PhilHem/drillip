@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/PhilHem/drillip/domain"
 	"github.com/PhilHem/drillip/integrations"
+	"github.com/PhilHem/drillip/notify"
 	"github.com/PhilHem/drillip/store"
 )
 
@@ -19,6 +21,7 @@ type Handler struct {
 	DB           *sql.DB
 	Store        *store.Store
 	Integrations integrations.Config
+	Notifier     *notify.Notifier
 }
 
 type apiError struct {
@@ -665,6 +668,24 @@ func (h *Handler) HandleCorrelate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, result)
+}
+
+// HandleTestEmail sends a test email to verify SMTP configuration.
+func (h *Handler) HandleTestEmail(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if h.Notifier == nil {
+		writeError(w, http.StatusServiceUnavailable, "notifications not configured")
+		return
+	}
+	if err := h.Notifier.SendTestEmail(); err != nil {
+		slog.Error("test email failed", "err", err)
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("send failed: %v", err))
+		return
+	}
+	writeJSON(w, map[string]string{"status": "sent", "to": h.Notifier.SMTP.To})
 }
 
 // writeError writes a structured JSON error response.

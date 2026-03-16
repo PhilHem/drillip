@@ -1,6 +1,7 @@
 package notify
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -19,12 +20,13 @@ import (
 // SMTPConfig holds email notification settings.
 // Notifications are disabled when Host or To is empty.
 type SMTPConfig struct {
-	Host string // SMTP server hostname
-	Port string // SMTP server port (default "25")
-	From string // sender address
-	To   string // recipient address
-	User string // optional SMTP username
-	Pass string // optional SMTP password
+	Host       string // SMTP server hostname
+	Port       string // SMTP server port (default "25")
+	From       string // sender address
+	To         string // recipient address
+	User       string // optional SMTP username
+	Pass       string // optional SMTP password
+	SkipVerify bool   // skip TLS certificate verification
 }
 
 func (c SMTPConfig) Enabled() bool {
@@ -192,7 +194,11 @@ func (n *Notifier) send(subject, textBody, htmlBody string) {
 
 	sendFn := n.sendMail
 	if sendFn == nil {
-		sendFn = smtp.SendMail
+		if n.SMTP.SkipVerify {
+			sendFn = n.sendMailSkipVerify
+		} else {
+			sendFn = smtp.SendMail
+		}
 	}
 
 	var err error
@@ -207,6 +213,106 @@ func (n *Notifier) send(subject, textBody, htmlBody string) {
 		slog.Error("notify: send attempt failed", "attempt", attempt+1, "err", err)
 	}
 	slog.Error("notify: send failed after 3 attempts", "err", err)
+}
+
+// sendMailSkipVerify is like smtp.SendMail but skips TLS certificate verification.
+// Used when the SMTP server uses a CA not in the container's trust store.
+func (n *Notifier) sendMailSkipVerify(addr string, auth smtp.Auth, from string, to []string, msg []byte) error {
+	host, _, _ := net.SplitHostPort(addr)
+
+	c, err := smtp.Dial(addr)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	// STARTTLS with InsecureSkipVerify
+	if err := c.StartTLS(&tls.Config{
+		ServerName:         host,
+		InsecureSkipVerify: true, //nolint:gosec // intentional, configured via DRILLIP_SMTP_SKIP_VERIFY
+	}); err != nil {
+		return err
+	}
+
+	if auth != nil {
+		if err := c.Auth(auth); err != nil {
+			return err
+		}
+	}
+
+	if err := c.Mail(from); err != nil {
+		return err
+	}
+	for _, rcpt := range to {
+		if err := c.Rcpt(rcpt); err != nil {
+			return err
+		}
+	}
+
+	w, err := c.Data()
+	if err != nil {
+		return err
+	}
+	if _, err := w.Write(msg); err != nil {
+		return err
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+	return c.Quit()
+}
+
+// SendTestEmail sends a simple test email to verify SMTP configuration.
+// Returns nil on success, or the error if sending fails.
+func (n *Notifier) SendTestEmail() error {
+	if !n.SMTP.Enabled() {
+		return fmt.Errorf("SMTP not configured")
+	}
+
+	subject := sanitizeHeader(fmt.Sprintf("[drillip] test email from %s", n.Project))
+	textBody := fmt.Sprintf("This is a test email from drillip.\n\nProject: %s\nSMTP: %s\nTime: %s\n",
+		n.Project, n.SMTP.Addr(), time.Now().UTC().Format(time.RFC3339))
+
+	htmlBody := fmt.Sprintf(`<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background-color:#f5f5f5;">
+<table role="presentation" width="100%%" cellspacing="0" cellpadding="0" style="background-color:#f5f5f5;padding:20px 0;"><tr><td align="center">
+<table role="presentation" width="600" cellspacing="0" cellpadding="0" style="background-color:#ffffff;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
+<tr><td style="background:linear-gradient(135deg,#059669 0%%,#047857 100%%);padding:24px 40px;border-radius:8px 8px 0 0;">
+<p style="margin:0;color:#ffffff;font-size:20px;font-weight:600;">SMTP Test Successful</p>
+</td></tr>
+<tr><td style="padding:32px 40px;">
+<p style="margin:0 0 16px 0;color:#1e293b;font-size:15px;">Email delivery is working. Drillip will notify you when errors occur.</p>
+<table role="presentation" width="100%%" cellspacing="0" cellpadding="0" style="background-color:#f8fafc;border-radius:6px;">
+<tr><td style="padding:16px 20px;">
+<p style="margin:0 0 8px 0;color:#64748b;font-size:13px;">Project: <strong style="color:#1e293b;">%s</strong></p>
+<p style="margin:0 0 8px 0;color:#64748b;font-size:13px;">SMTP: <strong style="color:#1e293b;">%s</strong></p>
+<p style="margin:0;color:#64748b;font-size:13px;">Time: <strong style="color:#1e293b;">%s</strong></p>
+</td></tr></table>
+</td></tr>
+<tr><td style="padding:20px 40px;background-color:#f8fafc;border-top:1px solid #e2e8f0;border-radius:0 0 8px 8px;">
+<p style="margin:0;color:#94a3b8;font-size:12px;">drillip error tracking</p>
+</td></tr>
+</table></td></tr></table></body></html>`,
+		html.EscapeString(n.Project),
+		html.EscapeString(n.SMTP.Addr()),
+		time.Now().UTC().Format(time.RFC3339))
+
+	msg := buildMultipartMIME(n.SMTP.From, n.SMTP.To, subject, textBody, htmlBody)
+
+	var smtpAuth smtp.Auth
+	if n.SMTP.User != "" {
+		smtpAuth = smtp.PlainAuth("", n.SMTP.User, n.SMTP.Pass, n.SMTP.Host)
+	}
+
+	sendFn := n.sendMail
+	if sendFn == nil {
+		if n.SMTP.SkipVerify {
+			sendFn = n.sendMailSkipVerify
+		} else {
+			sendFn = smtp.SendMail
+		}
+	}
+	return sendFn(n.SMTP.Addr(), smtpAuth, n.SMTP.From, []string{n.SMTP.To}, msg)
 }
 
 // flush sends all pending notifications as a digest (or individual if only one).

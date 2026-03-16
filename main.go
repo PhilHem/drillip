@@ -82,6 +82,9 @@ func loadConfig() Config {
 	if v := os.Getenv("DRILLIP_SMTP_PASS"); v != "" {
 		cfg.SMTP.Pass = v
 	}
+	if v := os.Getenv("DRILLIP_SMTP_SKIP_VERIFY"); v == "true" || v == "1" {
+		cfg.SMTP.SkipVerify = true
+	}
 	cfg.SMTPCooldown = 60 * time.Second // default
 	if v := os.Getenv("DRILLIP_SMTP_COOLDOWN"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
@@ -150,10 +153,10 @@ func runServe(cfg Config) {
 	var notifier *notify.Notifier
 	if cfg.SMTP.Enabled() {
 		notifier = notify.NewNotifier(cfg.SMTP, cfg.Project, cfg.SMTPCooldown, cfg.SMTPDigest, s)
-		slog.Info("email notifications enabled", "to", cfg.SMTP.To, "via", cfg.SMTP.Addr(), "cooldown", cfg.SMTPCooldown, "digest", cfg.SMTPDigest)
+		slog.Info("email notifications enabled", "to", cfg.SMTP.To, "via", cfg.SMTP.Addr(), "cooldown", cfg.SMTPCooldown, "digest", cfg.SMTPDigest, "skip_verify", cfg.SMTP.SkipVerify)
 	}
 
-	apiHandler := &api.Handler{DB: s.DB, Store: s, Integrations: cfg.Integrations}
+	apiHandler := &api.Handler{DB: s.DB, Store: s, Integrations: cfg.Integrations, Notifier: notifier}
 	healthHandler := ingest.HandleHealth(s.DB)
 
 	mux := http.NewServeMux()
@@ -169,6 +172,7 @@ func runServe(cfg Config) {
 	mux.HandleFunc("/api/0/gc/", apiHandler.HandleGC)
 	mux.HandleFunc("/api/0/resolve/", apiHandler.HandleResolve)
 	mux.HandleFunc("/api/0/correlate/", apiHandler.HandleCorrelate)
+	mux.HandleFunc("/api/0/test-email/", apiHandler.HandleTestEmail)
 	mux.HandleFunc("/api/0/silence/", apiHandler.HandleSilence)
 	mux.HandleFunc("/api/0/silences/", apiHandler.HandleListSilences)
 
