@@ -1,4 +1,4 @@
-package main
+package integrations
 
 import (
 	"net/http"
@@ -15,7 +15,7 @@ func TestQueryJournalctlSkipNonLinux(t *testing.T) {
 }
 
 func TestQueryJournalctlEmptyUnit(t *testing.T) {
-	entries, err := queryJournalctl("", time.Now())
+	entries, err := QueryJournalctl("", time.Now())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -25,7 +25,7 @@ func TestQueryJournalctlEmptyUnit(t *testing.T) {
 }
 
 func TestQueryVictoriaTracesEmptyURL(t *testing.T) {
-	td, err := queryVictoriaTraces("", "abc")
+	td, err := QueryVictoriaTraces("", "abc")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestQueryVictoriaTracesEmptyURL(t *testing.T) {
 }
 
 func TestQueryVictoriaTracesEmptyTraceID(t *testing.T) {
-	td, err := queryVictoriaTraces("http://example.com", "")
+	td, err := QueryVictoriaTraces("http://example.com", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestQueryVictoriaTracesMock(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	td, err := queryVictoriaTraces(srv.URL, "abc123")
+	td, err := QueryVictoriaTraces(srv.URL, "abc123")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -82,14 +82,14 @@ func TestQueryVictoriaTraces500(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := queryVictoriaTraces(srv.URL, "abc")
+	_, err := QueryVictoriaTraces(srv.URL, "abc")
 	if err == nil {
 		t.Fatal("expected error on 500")
 	}
 }
 
 func TestQueryVictoriaMetricsEmptyURL(t *testing.T) {
-	snap, err := queryVictoriaMetrics("", time.Now())
+	snap, err := QueryVictoriaMetrics("", time.Now())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestQueryVictoriaMetricsMock(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	snap, err := queryVictoriaMetrics(srv.URL, time.Now())
+	snap, err := QueryVictoriaMetrics(srv.URL, time.Now())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestQueryVictoriaMetricsMock(t *testing.T) {
 }
 
 func TestQueryPyroscopeEmptyURL(t *testing.T) {
-	entries, err := queryPyroscope("", "svc", time.Now())
+	entries, err := QueryPyroscope("", "svc", time.Now())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestQueryPyroscopeEmptyURL(t *testing.T) {
 }
 
 func TestQueryPyroscopeEmptyService(t *testing.T) {
-	entries, err := queryPyroscope("http://example.com", "", time.Now())
+	entries, err := QueryPyroscope("http://example.com", "", time.Now())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestQueryPyroscopeMock(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	entries, err := queryPyroscope(srv.URL, "myapp", time.Now())
+	entries, err := QueryPyroscope(srv.URL, "myapp", time.Now())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestQueryPyroscope500(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := queryPyroscope(srv.URL, "myapp", time.Now())
+	_, err := QueryPyroscope(srv.URL, "myapp", time.Now())
 	if err == nil {
 		t.Fatal("expected error on 500")
 	}

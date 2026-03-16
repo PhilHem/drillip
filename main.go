@@ -8,25 +8,28 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
+	"time"
+
+	"github.com/PhilHem/drillip/api"
+	"github.com/PhilHem/drillip/cli"
+	"github.com/PhilHem/drillip/ingest"
+	"github.com/PhilHem/drillip/integrations"
+	"github.com/PhilHem/drillip/notify"
+	"github.com/PhilHem/drillip/store"
 )
 
 // Config holds all environment-based configuration.
 type Config struct {
 	DB           string
 	Addr         string
-	SMTP         SMTPConfig
-	Integrations IntegrationsConfig
-}
-
-// IntegrationsConfig holds settings for the correlate command's
-// external data sources (logs, traces, metrics, profiles).
-type IntegrationsConfig struct {
-	Unit         string // journalctl unit name
-	VMURL        string // VictoriaMetrics base URL
-	VTURL        string // VictoriaTraces base URL
-	PyroscopeURL string
-	Service      string // service name for Pyroscope
+	Project      string // project name for notifications
+	SMTP         notify.SMTPConfig
+	SMTPCooldown time.Duration
+	ResolveAfter time.Duration
+	Integrations integrations.Config
 }
 
 func loadConfig() Config {
@@ -39,6 +42,9 @@ func loadConfig() Config {
 	}
 	if v := os.Getenv("DRILLIP_ADDR"); v != "" {
 		cfg.Addr = v
+	}
+	if v := os.Getenv("DRILLIP_PROJECT"); v != "" {
+		cfg.Project = v
 	}
 	if v := os.Getenv("DRILLIP_UNIT"); v != "" {
 		cfg.Integrations.Unit = v
@@ -73,7 +79,44 @@ func loadConfig() Config {
 	if v := os.Getenv("DRILLIP_SMTP_PASS"); v != "" {
 		cfg.SMTP.Pass = v
 	}
+	cfg.SMTPCooldown = 60 * time.Second // default
+	if v := os.Getenv("DRILLIP_SMTP_COOLDOWN"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.SMTPCooldown = d
+		}
+	}
+	cfg.ResolveAfter = 24 * time.Hour // default
+	if v := os.Getenv("DRILLIP_RESOLVE_AFTER"); v != "" {
+		if d, err := parseResolveDuration(v); err == nil {
+			cfg.ResolveAfter = d
+		}
+	}
 	return cfg
+}
+
+// parseResolveDuration parses duration strings like "24h", "7d", "1w".
+func parseResolveDuration(s string) (time.Duration, error) {
+	s = strings.TrimSpace(s)
+	if len(s) < 2 {
+		return 0, fmt.Errorf("invalid duration: %q", s)
+	}
+	suffix := s[len(s)-1]
+	numStr := s[:len(s)-1]
+	n, err := strconv.Atoi(numStr)
+	if err != nil {
+		// Fall back to time.ParseDuration for standard Go durations
+		return time.ParseDuration(s)
+	}
+	switch suffix {
+	case 'h':
+		return time.Duration(n) * time.Hour, nil
+	case 'd':
+		return time.Duration(n) * 24 * time.Hour, nil
+	case 'w':
+		return time.Duration(n) * 7 * 24 * time.Hour, nil
+	default:
+		return time.ParseDuration(s)
+	}
 }
 
 func runHealthCmd(cfg Config) {
@@ -91,27 +134,54 @@ func runHealthCmd(cfg Config) {
 }
 
 func runServe(cfg Config) {
-	if err := initDB(cfg.DB); err != nil {
+	s, err := store.Open(cfg.DB)
+	if err != nil {
 		log.Fatalf("init db: %v", err)
 	}
 
-	if cfg.SMTP.enabled() {
-		log.Printf("email notifications enabled (to: %s via %s)", cfg.SMTP.To, cfg.SMTP.addr())
+	var notifier *notify.Notifier
+	if cfg.SMTP.Enabled() {
+		notifier = notify.NewNotifier(cfg.SMTP, cfg.Project, cfg.SMTPCooldown)
+		log.Printf("email notifications enabled (to: %s via %s, cooldown: %s)", cfg.SMTP.To, cfg.SMTP.Addr(), cfg.SMTPCooldown)
 	}
 
+	apiHandler := &api.Handler{DB: s.DB}
+	healthHandler := ingest.HandleHealth(s.DB)
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", handleHealth)
-	mux.HandleFunc("/api/", makeIngestHandler(cfg.SMTP))
-	mux.HandleFunc("/-/healthy", handleHealth)
-	mux.HandleFunc("/api/0/top/", handleAPITop)
-	mux.HandleFunc("/api/0/recent/", handleAPIRecent)
-	mux.HandleFunc("/api/0/show/", handleAPIShow)
-	mux.HandleFunc("/api/0/trend/", handleAPITrend)
-	mux.HandleFunc("/api/0/releases/", handleAPIReleases)
-	mux.HandleFunc("/api/0/stats/", handleAPIStats)
-	mux.HandleFunc("/api/0/gc/", handleAPIGC)
+	mux.HandleFunc("/", healthHandler)
+	mux.HandleFunc("/api/", ingest.MakeHandler(s, notifier))
+	mux.HandleFunc("/-/healthy", healthHandler)
+	mux.HandleFunc("/api/0/top/", apiHandler.HandleTop)
+	mux.HandleFunc("/api/0/recent/", apiHandler.HandleRecent)
+	mux.HandleFunc("/api/0/show/", apiHandler.HandleShow)
+	mux.HandleFunc("/api/0/trend/", apiHandler.HandleTrend)
+	mux.HandleFunc("/api/0/releases/", apiHandler.HandleReleases)
+	mux.HandleFunc("/api/0/stats/", apiHandler.HandleStats)
+	mux.HandleFunc("/api/0/gc/", apiHandler.HandleGC)
+	mux.HandleFunc("/api/0/resolve/", apiHandler.HandleResolve)
 
 	srv := &http.Server{Addr: cfg.Addr, Handler: mux}
+
+	// Background auto-resolve goroutine
+	stopResolve := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				n, err := s.AutoResolve(cfg.ResolveAfter)
+				if err != nil {
+					log.Printf("auto-resolve error: %v", err)
+				} else if n > 0 {
+					log.Printf("auto-resolved %d error(s) (older than %s)", n, cfg.ResolveAfter)
+				}
+			case <-stopResolve:
+				return
+			}
+		}
+	}()
 
 	// Graceful shutdown: checkpoint WAL and close DB
 	stop := make(chan os.Signal, 1)
@@ -119,6 +189,7 @@ func runServe(cfg Config) {
 	go func() {
 		<-stop
 		log.Println("shutting down...")
+		close(stopResolve)
 		_ = srv.Shutdown(context.Background())
 	}()
 
@@ -127,9 +198,9 @@ func runServe(cfg Config) {
 		log.Fatal(err)
 	}
 
-	_, _ = db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	_ = s.Checkpoint()
 	log.Println("WAL checkpoint complete")
-	db.Close()
+	s.Close()
 }
 
 func main() {
@@ -150,43 +221,47 @@ func main() {
 
 	remaining := globalFlags.Args()
 
-	// No args or "serve" → start HTTP server
+	// No args or "serve" -> start HTTP server
 	if len(remaining) == 0 || remaining[0] == "serve" {
 		runServe(cfg)
 		return
 	}
 
 	// CLI commands need the DB
-	if err := initDB(cfg.DB); err != nil {
+	s, err := store.Open(cfg.DB)
+	if err != nil {
 		log.Fatalf("init db: %v", err)
 	}
-	defer db.Close()
+	defer s.Close()
 
+	c := &cli.CLI{DB: s.DB}
 	cmd := remaining[0]
 	args := remaining[1:]
 
 	switch cmd {
 	case "top":
-		runTop(args, os.Stdout)
+		c.RunTop(args, os.Stdout)
 	case "recent":
-		runRecent(args, os.Stdout)
+		c.RunRecent(args, os.Stdout)
 	case "show":
-		runShow(args, os.Stdout)
+		c.RunShow(args, os.Stdout)
 	case "trend":
-		runTrend(args, os.Stdout)
+		c.RunTrend(args, os.Stdout)
 	case "correlate":
-		runCorrelate(args, os.Stdout, cfg.Integrations)
+		c.RunCorrelate(args, os.Stdout, cfg.Integrations)
 	case "releases":
-		runReleases(args, os.Stdout)
+		c.RunReleases(args, os.Stdout)
 	case "stats":
-		runStats(args, os.Stdout)
+		c.RunStats(args, os.Stdout)
 	case "gc":
-		runGC(args, os.Stdout)
+		c.RunGC(args, os.Stdout)
+	case "resolve":
+		c.RunResolve(args, os.Stdout)
 	case "health":
 		runHealthCmd(cfg)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
-		fmt.Fprintln(os.Stderr, "commands: serve, top, recent, show, trend, correlate, releases, stats, gc, health")
+		fmt.Fprintln(os.Stderr, "commands: serve, top, recent, show, trend, correlate, releases, stats, gc, resolve, health")
 		os.Exit(1)
 	}
 }

@@ -1,11 +1,11 @@
-package main
+package domain
 
 import (
 	"crypto/sha256"
 	"fmt"
 )
 
-func fingerprint(ev *Event) string {
+func Fingerprint(ev *Event) string {
 	h := sha256.New()
 
 	if ev.Exception != nil && len(ev.Exception.Values) > 0 {
@@ -21,7 +21,7 @@ func fingerprint(ev *Event) string {
 	} else {
 		// Message: hash the message content
 		h.Write([]byte("message:"))
-		msg := ev.messageText()
+		msg := ev.MessageText()
 		h.Write([]byte(msg))
 	}
 

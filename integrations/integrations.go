@@ -1,4 +1,4 @@
-package main
+package integrations
 
 import (
 	"encoding/json"
@@ -9,6 +9,16 @@ import (
 	"strings"
 	"time"
 )
+
+// Config holds settings for the correlate command's
+// external data sources (logs, traces, metrics, profiles).
+type Config struct {
+	Unit         string // journalctl unit name
+	VMURL        string // VictoriaMetrics base URL
+	VTURL        string // VictoriaTraces base URL
+	PyroscopeURL string
+	Service      string // service name for Pyroscope
+}
 
 var httpClient = &http.Client{Timeout: 5 * time.Second}
 
@@ -23,7 +33,7 @@ type JournalEntry struct {
 	Priority  string `json:"PRIORITY"`
 }
 
-func queryJournalctl(unit string, ts time.Time) ([]JournalEntry, error) {
+func QueryJournalctl(unit string, ts time.Time) ([]JournalEntry, error) {
 	if unit == "" {
 		return nil, nil
 	}
@@ -62,7 +72,7 @@ type TraceSpan struct {
 	Tags          map[string]string
 }
 
-func queryVictoriaTraces(baseURL, traceID string) (*TraceData, error) {
+func QueryVictoriaTraces(baseURL, traceID string) (*TraceData, error) {
 	if baseURL == "" || traceID == "" {
 		return nil, nil
 	}
@@ -133,16 +143,16 @@ type MetricsSnapshot struct {
 	Values map[string]string
 }
 
-func queryVictoriaMetrics(baseURL string, ts time.Time) (*MetricsSnapshot, error) {
+func QueryVictoriaMetrics(baseURL string, ts time.Time) (*MetricsSnapshot, error) {
 	if baseURL == "" {
 		return nil, nil
 	}
 
 	queries := map[string]string{
-		"error_rate":  `rate(http_requests_total{status=~"5.."}[5m])`,
-		"p99_latency": `histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))`,
-		"cpu_usage":   `process_cpu_seconds_total`,
-		"memory_mb":   `process_resident_memory_bytes / 1024 / 1024`,
+		"error_rate":   `rate(http_requests_total{status=~"5.."}[5m])`,
+		"p99_latency":  `histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))`,
+		"cpu_usage":    `process_cpu_seconds_total`,
+		"memory_mb":    `process_resident_memory_bytes / 1024 / 1024`,
 	}
 
 	snap := &MetricsSnapshot{Values: make(map[string]string)}
@@ -182,7 +192,7 @@ type ProfileEntry struct {
 	Self     int64
 }
 
-func queryPyroscope(baseURL, service string, ts time.Time) ([]ProfileEntry, error) {
+func QueryPyroscope(baseURL, service string, ts time.Time) ([]ProfileEntry, error) {
 	if baseURL == "" || service == "" {
 		return nil, nil
 	}

@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"encoding/json"
@@ -6,6 +6,8 @@ import (
 	"io"
 	"strings"
 	"time"
+
+	"github.com/PhilHem/drillip/domain"
 )
 
 func printTable(w io.Writer, headers []string, rows [][]string) {
@@ -74,7 +76,7 @@ func printStacktrace(w io.Writer, stackJSON string) {
 	if stackJSON == "" {
 		return
 	}
-	var st Stacktrace
+	var st domain.Stacktrace
 	if json.Unmarshal([]byte(stackJSON), &st) != nil {
 		return
 	}

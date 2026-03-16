@@ -1,12 +1,19 @@
-package main
+package api
 
 import (
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// Handler serves the JSON API endpoints.
+type Handler struct {
+	DB *sql.DB
+}
 
 type apiError struct {
 	Fingerprint string `json:"fingerprint"`
@@ -15,23 +22,27 @@ type apiError struct {
 	Type        string `json:"type"`
 	Value       string `json:"value"`
 	LastSeen    string `json:"last_seen"`
+	ResolvedAt  string `json:"resolved_at,omitempty"`
+	State       string `json:"state"`
 }
 
 type apiErrorDetail struct {
-	Fingerprint string            `json:"fingerprint"`
-	Count       int               `json:"count"`
-	Level       string            `json:"level"`
-	Type        string            `json:"type"`
-	Value       string            `json:"value"`
-	Release     string            `json:"release,omitempty"`
-	Environment string            `json:"environment,omitempty"`
-	Platform    string            `json:"platform,omitempty"`
-	FirstSeen   string            `json:"first_seen"`
-	LastSeen    string            `json:"last_seen"`
-	Stacktrace  json.RawMessage   `json:"stacktrace,omitempty"`
-	Breadcrumbs json.RawMessage   `json:"breadcrumbs,omitempty"`
-	User        json.RawMessage   `json:"user,omitempty"`
-	Tags        json.RawMessage   `json:"tags,omitempty"`
+	Fingerprint string             `json:"fingerprint"`
+	Count       int                `json:"count"`
+	Level       string             `json:"level"`
+	Type        string             `json:"type"`
+	Value       string             `json:"value"`
+	Release     string             `json:"release,omitempty"`
+	Environment string             `json:"environment,omitempty"`
+	Platform    string             `json:"platform,omitempty"`
+	FirstSeen   string             `json:"first_seen"`
+	LastSeen    string             `json:"last_seen"`
+	ResolvedAt  string             `json:"resolved_at,omitempty"`
+	State       string             `json:"state"`
+	Stacktrace  json.RawMessage    `json:"stacktrace,omitempty"`
+	Breadcrumbs json.RawMessage    `json:"breadcrumbs,omitempty"`
+	User        json.RawMessage    `json:"user,omitempty"`
+	Tags        json.RawMessage    `json:"tags,omitempty"`
 	TagDist     map[string]tagDist `json:"tag_distribution,omitempty"`
 }
 
@@ -52,13 +63,58 @@ type apiStats struct {
 	LastSeen         string `json:"last_seen,omitempty"`
 }
 
-func handleAPITop(w http.ResponseWriter, r *http.Request) {
+// deriveState returns "resolved", "new", or "ongoing" based on resolved_at and first_seen.
+func deriveState(resolvedAt, firstSeen string) string {
+	if resolvedAt != "" {
+		return "resolved"
+	}
+	if t, err := time.Parse(time.RFC3339, firstSeen); err == nil {
+		if time.Since(t) < time.Hour {
+			return "new"
+		}
+	}
+	return "ongoing"
+}
+
+// parseTag splits "key=value" into (key, value, true) or ("", "", false).
+func parseTag(s string) (string, string, bool) {
+	i := strings.IndexByte(s, '=')
+	if i <= 0 || i == len(s)-1 {
+		return "", "", false
+	}
+	return s[:i], s[i+1:], true
+}
+
+func parseDuration(s string) (time.Duration, error) {
+	s = strings.TrimSpace(s)
+	if len(s) < 2 {
+		return 0, fmt.Errorf("invalid duration: %q", s)
+	}
+	suffix := s[len(s)-1]
+	numStr := s[:len(s)-1]
+	n, err := strconv.Atoi(numStr)
+	if err != nil {
+		return 0, fmt.Errorf("invalid duration: %q", s)
+	}
+	switch suffix {
+	case 'h':
+		return time.Duration(n) * time.Hour, nil
+	case 'd':
+		return time.Duration(n) * 24 * time.Hour, nil
+	case 'w':
+		return time.Duration(n) * 7 * 24 * time.Hour, nil
+	default:
+		return 0, fmt.Errorf("unknown suffix %q (use h/d/w)", string(suffix))
+	}
+}
+
+func (h *Handler) HandleTop(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	query := `SELECT fingerprint, count, type, value, level, last_seen FROM errors`
+	query := `SELECT fingerprint, count, type, value, level, last_seen, first_seen, COALESCE(resolved_at, '') FROM errors`
 	var conditions []string
 	var queryArgs []interface{}
 
@@ -77,7 +133,7 @@ func handleAPITop(w http.ResponseWriter, r *http.Request) {
 	}
 	query += ` ORDER BY count DESC LIMIT 25`
 
-	rows, err := db.Query(query, queryArgs...)
+	rows, err := h.DB.Query(query, queryArgs...)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -87,16 +143,19 @@ func handleAPITop(w http.ResponseWriter, r *http.Request) {
 	var results []apiError
 	for rows.Next() {
 		var e apiError
-		if err := rows.Scan(&e.Fingerprint, &e.Count, &e.Type, &e.Value, &e.Level, &e.LastSeen); err != nil {
+		var firstSeen, resolvedAt string
+		if err := rows.Scan(&e.Fingerprint, &e.Count, &e.Type, &e.Value, &e.Level, &e.LastSeen, &firstSeen, &resolvedAt); err != nil {
 			continue
 		}
+		e.ResolvedAt = resolvedAt
+		e.State = deriveState(resolvedAt, firstSeen)
 		results = append(results, e)
 	}
 
 	writeJSON(w, results)
 }
 
-func handleAPIShow(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleShow(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -111,19 +170,22 @@ func handleAPIShow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var d apiErrorDetail
-	var stacktrace, breadcrumbs, userCtx, tags string
-	err := db.QueryRow(`
+	var stacktrace, breadcrumbs, userCtx, tags, resolvedAt string
+	err := h.DB.QueryRow(`
 		SELECT fingerprint, type, value, level, stacktrace, breadcrumbs,
 			release_tag, environment, user_context, tags, platform,
-			first_seen, last_seen, count
+			first_seen, last_seen, count, COALESCE(resolved_at, '')
 		FROM errors WHERE fingerprint LIKE ?||'%' LIMIT 1
 	`, fp).Scan(&d.Fingerprint, &d.Type, &d.Value, &d.Level, &stacktrace, &breadcrumbs,
 		&d.Release, &d.Environment, &userCtx, &tags, &d.Platform,
-		&d.FirstSeen, &d.LastSeen, &d.Count)
+		&d.FirstSeen, &d.LastSeen, &d.Count, &resolvedAt)
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+
+	d.ResolvedAt = resolvedAt
+	d.State = deriveState(resolvedAt, d.FirstSeen)
 
 	if stacktrace != "" {
 		d.Stacktrace = json.RawMessage(stacktrace)
@@ -138,28 +200,28 @@ func handleAPIShow(w http.ResponseWriter, r *http.Request) {
 		d.Tags = json.RawMessage(tags)
 	}
 
-	d.TagDist = queryTagDistribution(d.Fingerprint)
+	d.TagDist = h.queryTagDistribution(d.Fingerprint)
 
 	writeJSON(w, d)
 }
 
-func handleAPIStats(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleStats(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	var s apiStats
-	_ = db.QueryRow("SELECT COUNT(*) FROM errors").Scan(&s.UniqueErrors)
-	_ = db.QueryRow("SELECT COUNT(*) FROM occurrences").Scan(&s.TotalOccurrences)
-	_ = db.QueryRow("SELECT MIN(first_seen) FROM errors").Scan(&s.FirstSeen)
-	_ = db.QueryRow("SELECT MAX(last_seen) FROM errors").Scan(&s.LastSeen)
+	_ = h.DB.QueryRow("SELECT COUNT(*) FROM errors").Scan(&s.UniqueErrors)
+	_ = h.DB.QueryRow("SELECT COUNT(*) FROM occurrences").Scan(&s.TotalOccurrences)
+	_ = h.DB.QueryRow("SELECT MIN(first_seen) FROM errors").Scan(&s.FirstSeen)
+	_ = h.DB.QueryRow("SELECT MAX(last_seen) FROM errors").Scan(&s.LastSeen)
 
 	writeJSON(w, s)
 }
 
-func queryTagDistribution(fp string) map[string]tagDist {
-	rows, err := db.Query(`SELECT tags FROM occurrences WHERE fingerprint = ? AND tags != '' AND tags IS NOT NULL`, fp)
+func (h *Handler) queryTagDistribution(fp string) map[string]tagDist {
+	rows, err := h.DB.Query(`SELECT tags FROM occurrences WHERE fingerprint = ? AND tags != '' AND tags IS NOT NULL`, fp)
 	if err != nil {
 		return nil
 	}
@@ -205,22 +267,22 @@ func queryTagDistribution(fp string) map[string]tagDist {
 	return result
 }
 
-func handleAPIRecent(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleRecent(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	hours := 1
-	if h := r.URL.Query().Get("hours"); h != "" {
-		if n, err := strconv.Atoi(h); err == nil && n > 0 {
+	if hStr := r.URL.Query().Get("hours"); hStr != "" {
+		if n, err := strconv.Atoi(hStr); err == nil && n > 0 {
 			hours = n
 		}
 	}
 
 	since := time.Now().UTC().Add(-time.Duration(hours) * time.Hour).Format(time.RFC3339)
 
-	query := `SELECT fingerprint, count, type, value, level, first_seen FROM errors WHERE first_seen > ?`
+	query := `SELECT fingerprint, count, type, value, level, first_seen, COALESCE(resolved_at, '') FROM errors WHERE first_seen > ?`
 	queryArgs := []interface{}{since}
 	if level := r.URL.Query().Get("level"); level != "" {
 		query += ` AND level = ?`
@@ -234,7 +296,7 @@ func handleAPIRecent(w http.ResponseWriter, r *http.Request) {
 	}
 	query += ` ORDER BY first_seen DESC`
 
-	rows, err := db.Query(query, queryArgs...)
+	rows, err := h.DB.Query(query, queryArgs...)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -244,9 +306,12 @@ func handleAPIRecent(w http.ResponseWriter, r *http.Request) {
 	var results []apiError
 	for rows.Next() {
 		var e apiError
-		if err := rows.Scan(&e.Fingerprint, &e.Count, &e.Type, &e.Value, &e.Level, &e.LastSeen); err != nil {
+		var resolvedAt string
+		if err := rows.Scan(&e.Fingerprint, &e.Count, &e.Type, &e.Value, &e.Level, &e.LastSeen, &resolvedAt); err != nil {
 			continue
 		}
+		e.ResolvedAt = resolvedAt
+		e.State = deriveState(resolvedAt, e.LastSeen)
 		results = append(results, e)
 	}
 
@@ -258,7 +323,7 @@ type apiBucket struct {
 	Count int    `json:"count"`
 }
 
-func handleAPITrend(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleTrend(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -271,13 +336,13 @@ func handleAPITrend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var fullFP string
-	if err := db.QueryRow("SELECT fingerprint FROM errors WHERE fingerprint LIKE ?||'%' LIMIT 1", fp).Scan(&fullFP); err != nil {
+	if err := h.DB.QueryRow("SELECT fingerprint FROM errors WHERE fingerprint LIKE ?||'%' LIMIT 1", fp).Scan(&fullFP); err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
 
 	since := time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339)
-	rows, err := db.Query(`
+	rows, err := h.DB.Query(`
 		SELECT strftime('%Y-%m-%d %H:00', timestamp) AS hour, COUNT(*) AS cnt
 		FROM occurrences
 		WHERE fingerprint = ? AND timestamp > ?
@@ -311,7 +376,7 @@ type apiRelease struct {
 	LastSeen  string `json:"last_seen"`
 }
 
-func handleAPIReleases(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleReleases(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -324,12 +389,12 @@ func handleAPIReleases(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var fullFP string
-	if err := db.QueryRow("SELECT fingerprint FROM errors WHERE fingerprint LIKE ?||'%' LIMIT 1", fp).Scan(&fullFP); err != nil {
+	if err := h.DB.QueryRow("SELECT fingerprint FROM errors WHERE fingerprint LIKE ?||'%' LIMIT 1", fp).Scan(&fullFP); err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
 
-	rows, err := db.Query(`
+	rows, err := h.DB.Query(`
 		SELECT COALESCE(release_tag, ''), COUNT(*),
 			MIN(timestamp), MAX(timestamp)
 		FROM occurrences WHERE fingerprint = ?
@@ -361,7 +426,7 @@ type apiGCResult struct {
 	Threshold string `json:"threshold"`
 }
 
-func handleAPIGC(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) HandleGC(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -380,7 +445,7 @@ func handleAPIGC(w http.ResponseWriter, r *http.Request) {
 	}
 
 	threshold := time.Now().UTC().Add(-dur).Format(time.RFC3339)
-	res, err := db.Exec("DELETE FROM occurrences WHERE timestamp < ?", threshold)
+	res, err := h.DB.Exec("DELETE FROM occurrences WHERE timestamp < ?", threshold)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
@@ -390,10 +455,46 @@ func handleAPIGC(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, apiGCResult{Deleted: deleted, Threshold: threshold})
 }
 
+func (h *Handler) HandleResolve(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	fp := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/0/resolve/"), "/")
+	if fp == "" {
+		http.Error(w, "missing fingerprint", http.StatusBadRequest)
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := h.DB.Exec(
+		`UPDATE errors SET resolved_at = ? WHERE fingerprint LIKE ?||'%' AND resolved_at IS NULL`,
+		now, fp,
+	)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		http.Error(w, "not found or already resolved", http.StatusNotFound)
+		return
+	}
+
+	// Fetch the full fingerprint for the response
+	var fullFP string
+	_ = h.DB.QueryRow("SELECT fingerprint FROM errors WHERE fingerprint LIKE ?||'%' LIMIT 1", fp).Scan(&fullFP)
+
+	writeJSON(w, map[string]interface{}{
+		"fingerprint": fullFP,
+		"resolved_at": now,
+	})
+}
+
 // writeJSON is a helper to write a value as JSON with the appropriate headers.
 func writeJSON(w http.ResponseWriter, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	_ = json.NewEncoder(w).Encode(v)
 }
-

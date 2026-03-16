@@ -1,4 +1,4 @@
-package main
+package domain
 
 import "encoding/json"
 
@@ -10,6 +10,7 @@ type Event struct {
 	Exception   *ExceptionData             `json:"exception"`
 	LogEntry    *LogEntry                  `json:"logentry"`
 	Message     string                     `json:"message"`
+	Request     *RequestData               `json:"request"`
 	Breadcrumbs *BreadcrumbData            `json:"breadcrumbs"`
 	Contexts    map[string]json.RawMessage `json:"contexts"`
 	Release     string                     `json:"release"`
@@ -18,6 +19,11 @@ type Event struct {
 	Tags        map[string]string          `json:"tags"`
 	Platform    string                     `json:"platform"`
 	ServerName  string                     `json:"server_name"`
+}
+
+type RequestData struct {
+	URL    string `json:"url"`
+	Method string `json:"method"`
 }
 
 // EffectiveLevel returns the event level, defaulting based on type.
@@ -36,8 +42,8 @@ type LogEntry struct {
 	Message   string `json:"message"`
 }
 
-// messageText returns the best available message string.
-func (e *Event) messageText() string {
+// MessageText returns the best available message string.
+func (e *Event) MessageText() string {
 	if e.LogEntry != nil {
 		if e.LogEntry.Formatted != "" {
 			return e.LogEntry.Formatted
@@ -90,9 +96,4 @@ type Frame struct {
 
 type BreadcrumbData struct {
 	Values []json.RawMessage `json:"values"`
-}
-
-type EnvelopeItemHeader struct {
-	Type   string `json:"type"`
-	Length int    `json:"length"`
 }
