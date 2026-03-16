@@ -3,12 +3,12 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/PhilHem/drillip/domain"
 	"github.com/PhilHem/drillip/store"
 )
 
@@ -46,17 +46,7 @@ type apiErrorDetail struct {
 	Breadcrumbs json.RawMessage    `json:"breadcrumbs,omitempty"`
 	User        json.RawMessage    `json:"user,omitempty"`
 	Tags        json.RawMessage    `json:"tags,omitempty"`
-	TagDist     map[string]tagDist `json:"tag_distribution,omitempty"`
-}
-
-type tagDist struct {
-	Values []tagValue `json:"values"`
-}
-
-type tagValue struct {
-	Value   string `json:"value"`
-	Count   int    `json:"count"`
-	Percent int    `json:"percent"`
+	TagDist     map[string]store.TagDist `json:"tag_distribution,omitempty"`
 }
 
 type apiStats struct {
@@ -66,54 +56,9 @@ type apiStats struct {
 	LastSeen         string `json:"last_seen,omitempty"`
 }
 
-// deriveState returns "resolved", "new", or "ongoing" based on resolved_at and first_seen.
-func deriveState(resolvedAt, firstSeen string) string {
-	if resolvedAt != "" {
-		return "resolved"
-	}
-	if t, err := time.Parse(time.RFC3339, firstSeen); err == nil {
-		if time.Since(t) < time.Hour {
-			return "new"
-		}
-	}
-	return "ongoing"
-}
-
-// parseTag splits "key=value" into (key, value, true) or ("", "", false).
-func parseTag(s string) (string, string, bool) {
-	i := strings.IndexByte(s, '=')
-	if i <= 0 || i == len(s)-1 {
-		return "", "", false
-	}
-	return s[:i], s[i+1:], true
-}
-
-func parseDuration(s string) (time.Duration, error) {
-	s = strings.TrimSpace(s)
-	if len(s) < 2 {
-		return 0, fmt.Errorf("invalid duration: %q", s)
-	}
-	suffix := s[len(s)-1]
-	numStr := s[:len(s)-1]
-	n, err := strconv.Atoi(numStr)
-	if err != nil {
-		return 0, fmt.Errorf("invalid duration: %q", s)
-	}
-	switch suffix {
-	case 'h':
-		return time.Duration(n) * time.Hour, nil
-	case 'd':
-		return time.Duration(n) * 24 * time.Hour, nil
-	case 'w':
-		return time.Duration(n) * 7 * 24 * time.Hour, nil
-	default:
-		return 0, fmt.Errorf("unknown suffix %q (use h/d/w)", string(suffix))
-	}
-}
-
 func (h *Handler) HandleTop(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
@@ -126,7 +71,7 @@ func (h *Handler) HandleTop(w http.ResponseWriter, r *http.Request) {
 		queryArgs = append(queryArgs, level)
 	}
 	if tag := r.URL.Query().Get("tag"); tag != "" {
-		if k, v, ok := parseTag(tag); ok {
+		if k, v, ok := domain.ParseTag(tag); ok {
 			conditions = append(conditions, `json_extract(tags, '$.'||?) = ?`)
 			queryArgs = append(queryArgs, k, v)
 		}
@@ -138,7 +83,7 @@ func (h *Handler) HandleTop(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.DB.Query(query, queryArgs...)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	defer rows.Close()
@@ -151,7 +96,7 @@ func (h *Handler) HandleTop(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		e.ResolvedAt = resolvedAt
-		e.State = deriveState(resolvedAt, firstSeen)
+		e.State = domain.DeriveState(resolvedAt, firstSeen)
 		results = append(results, e)
 	}
 
@@ -160,7 +105,7 @@ func (h *Handler) HandleTop(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) HandleShow(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
@@ -168,27 +113,34 @@ func (h *Handler) HandleShow(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/0/show/")
 	fp := strings.TrimSuffix(path, "/")
 	if fp == "" {
-		http.Error(w, "missing fingerprint", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "missing fingerprint")
+		return
+	}
+
+	fullFP, err := h.Store.FindByPrefix(fp)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
 
 	var d apiErrorDetail
 	var stacktrace, breadcrumbs, userCtx, tags, resolvedAt string
-	err := h.DB.QueryRow(`
-		SELECT fingerprint, type, value, level, stacktrace, breadcrumbs,
+	err = h.DB.QueryRow(`
+		SELECT type, value, level, stacktrace, breadcrumbs,
 			release_tag, environment, user_context, tags, platform,
 			first_seen, last_seen, count, COALESCE(resolved_at, '')
-		FROM errors WHERE fingerprint LIKE ?||'%' LIMIT 1
-	`, fp).Scan(&d.Fingerprint, &d.Type, &d.Value, &d.Level, &stacktrace, &breadcrumbs,
+		FROM errors WHERE fingerprint = ?
+	`, fullFP).Scan(&d.Type, &d.Value, &d.Level, &stacktrace, &breadcrumbs,
 		&d.Release, &d.Environment, &userCtx, &tags, &d.Platform,
 		&d.FirstSeen, &d.LastSeen, &d.Count, &resolvedAt)
 	if err != nil {
-		http.Error(w, "not found", http.StatusNotFound)
+		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
+	d.Fingerprint = fullFP
 
 	d.ResolvedAt = resolvedAt
-	d.State = deriveState(resolvedAt, d.FirstSeen)
+	d.State = domain.DeriveState(resolvedAt, d.FirstSeen)
 
 	if stacktrace != "" {
 		d.Stacktrace = json.RawMessage(stacktrace)
@@ -203,14 +155,14 @@ func (h *Handler) HandleShow(w http.ResponseWriter, r *http.Request) {
 		d.Tags = json.RawMessage(tags)
 	}
 
-	d.TagDist = h.queryTagDistribution(d.Fingerprint)
+	d.TagDist = h.Store.GetTagDistribution(d.Fingerprint)
 
 	writeJSON(w, d)
 }
 
 func (h *Handler) HandleStats(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
@@ -223,56 +175,9 @@ func (h *Handler) HandleStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s)
 }
 
-func (h *Handler) queryTagDistribution(fp string) map[string]tagDist {
-	rows, err := h.DB.Query(`SELECT tags FROM occurrences WHERE fingerprint = ? AND tags != '' AND tags IS NOT NULL`, fp)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-
-	dist := map[string]map[string]int{}
-	total := 0
-
-	for rows.Next() {
-		var tagsJSON string
-		if err := rows.Scan(&tagsJSON); err != nil || tagsJSON == "" {
-			continue
-		}
-		var tagMap map[string]string
-		if json.Unmarshal([]byte(tagsJSON), &tagMap) != nil {
-			continue
-		}
-		total++
-		for k, v := range tagMap {
-			if dist[k] == nil {
-				dist[k] = map[string]int{}
-			}
-			dist[k][v]++
-		}
-	}
-
-	if len(dist) == 0 {
-		return nil
-	}
-
-	result := map[string]tagDist{}
-	for k, values := range dist {
-		var td tagDist
-		for v, c := range values {
-			pct := 0
-			if total > 0 {
-				pct = c * 100 / total
-			}
-			td.Values = append(td.Values, tagValue{Value: v, Count: c, Percent: pct})
-		}
-		result[k] = td
-	}
-	return result
-}
-
 func (h *Handler) HandleRecent(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
@@ -292,7 +197,7 @@ func (h *Handler) HandleRecent(w http.ResponseWriter, r *http.Request) {
 		queryArgs = append(queryArgs, level)
 	}
 	if tag := r.URL.Query().Get("tag"); tag != "" {
-		if k, v, ok := parseTag(tag); ok {
+		if k, v, ok := domain.ParseTag(tag); ok {
 			query += ` AND json_extract(tags, '$.'||?) = ?`
 			queryArgs = append(queryArgs, k, v)
 		}
@@ -301,7 +206,7 @@ func (h *Handler) HandleRecent(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.DB.Query(query, queryArgs...)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	defer rows.Close()
@@ -314,7 +219,7 @@ func (h *Handler) HandleRecent(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		e.ResolvedAt = resolvedAt
-		e.State = deriveState(resolvedAt, e.LastSeen)
+		e.State = domain.DeriveState(resolvedAt, e.LastSeen)
 		results = append(results, e)
 	}
 
@@ -328,19 +233,19 @@ type apiBucket struct {
 
 func (h *Handler) HandleTrend(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
 	fp := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/0/trend/"), "/")
 	if fp == "" {
-		http.Error(w, "missing fingerprint", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "missing fingerprint")
 		return
 	}
 
-	var fullFP string
-	if err := h.DB.QueryRow("SELECT fingerprint FROM errors WHERE fingerprint LIKE ?||'%' LIMIT 1", fp).Scan(&fullFP); err != nil {
-		http.Error(w, "not found", http.StatusNotFound)
+	fullFP, err := h.Store.FindByPrefix(fp)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
 
@@ -352,7 +257,7 @@ func (h *Handler) HandleTrend(w http.ResponseWriter, r *http.Request) {
 		GROUP BY hour ORDER BY hour
 	`, fullFP, since)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	defer rows.Close()
@@ -381,19 +286,19 @@ type apiRelease struct {
 
 func (h *Handler) HandleReleases(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
 	fp := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/0/releases/"), "/")
 	if fp == "" {
-		http.Error(w, "missing fingerprint", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "missing fingerprint")
 		return
 	}
 
-	var fullFP string
-	if err := h.DB.QueryRow("SELECT fingerprint FROM errors WHERE fingerprint LIKE ?||'%' LIMIT 1", fp).Scan(&fullFP); err != nil {
-		http.Error(w, "not found", http.StatusNotFound)
+	fullFP, err := h.Store.FindByPrefix(fp)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
 
@@ -404,7 +309,7 @@ func (h *Handler) HandleReleases(w http.ResponseWriter, r *http.Request) {
 		GROUP BY release_tag ORDER BY COUNT(*) DESC
 	`, fullFP)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	defer rows.Close()
@@ -431,26 +336,26 @@ type apiGCResult struct {
 
 func (h *Handler) HandleGC(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
 	durStr := r.URL.Query().Get("older_than")
 	if durStr == "" {
-		http.Error(w, "missing older_than param (e.g., 7d, 30d, 24h)", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "missing older_than param (e.g., 7d, 30d, 24h)")
 		return
 	}
 
-	dur, err := parseDuration(durStr)
+	dur, err := domain.ParseDuration(durStr)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	threshold := time.Now().UTC().Add(-dur).Format(time.RFC3339)
 	res, err := h.DB.Exec("DELETE FROM occurrences WHERE timestamp < ?", threshold)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	deleted, _ := res.RowsAffected()
@@ -460,45 +365,36 @@ func (h *Handler) HandleGC(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) HandleResolve(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
 	fp := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/0/resolve/"), "/")
 	if fp == "" {
-		http.Error(w, "missing fingerprint", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "missing fingerprint")
 		return
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
-	res, err := h.DB.Exec(
-		`UPDATE errors SET resolved_at = ? WHERE fingerprint LIKE ?||'%' AND resolved_at IS NULL`,
-		now, fp,
-	)
+	result, err := h.Store.Resolve(fp)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		http.Error(w, "not found or already resolved", http.StatusNotFound)
+	if result.Matched == 0 {
+		writeError(w, http.StatusNotFound, "not found or already resolved")
 		return
 	}
-
-	// Fetch the full fingerprint for the response
-	var fullFP string
-	_ = h.DB.QueryRow("SELECT fingerprint FROM errors WHERE fingerprint LIKE ?||'%' LIMIT 1", fp).Scan(&fullFP)
 
 	writeJSON(w, map[string]interface{}{
-		"fingerprint": fullFP,
-		"resolved_at": now,
+		"fingerprint": result.Fingerprint,
+		"resolved_at": result.ResolvedAt,
 	})
 }
 
 func (h *Handler) HandleSilence(w http.ResponseWriter, r *http.Request) {
 	fp := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/0/silence/"), "/")
 	if fp == "" {
-		http.Error(w, "missing fingerprint", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "missing fingerprint")
 		return
 	}
 
@@ -506,9 +402,9 @@ func (h *Handler) HandleSilence(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		var expiresAt *time.Time
 		if durStr := r.URL.Query().Get("duration"); durStr != "" {
-			dur, err := parseDuration(durStr)
+			dur, err := domain.ParseDuration(durStr)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
+				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}
 			t := time.Now().UTC().Add(dur)
@@ -517,7 +413,7 @@ func (h *Handler) HandleSilence(w http.ResponseWriter, r *http.Request) {
 		reason := r.URL.Query().Get("reason")
 
 		if err := h.Store.Silence(fp, expiresAt, reason); err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
 
@@ -529,13 +425,13 @@ func (h *Handler) HandleSilence(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodDelete:
 		if err := h.Store.Unsilence(fp); err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
 		writeJSON(w, map[string]interface{}{"fingerprint": fp, "status": "unsilenced"})
 
 	default:
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
@@ -548,13 +444,13 @@ type apiSilence struct {
 
 func (h *Handler) HandleListSilences(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
 	entries, err := h.Store.ListSilences()
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
@@ -571,9 +467,15 @@ func (h *Handler) HandleListSilences(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, results)
 }
 
+// writeError writes a structured JSON error response.
+func writeError(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
 // writeJSON is a helper to write a value as JSON with the appropriate headers.
 func writeJSON(w http.ResponseWriter, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 	_ = json.NewEncoder(w).Encode(v)
 }

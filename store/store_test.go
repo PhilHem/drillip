@@ -190,12 +190,18 @@ func TestManualResolve(t *testing.T) {
 		t.Fatalf("store: %v", err)
 	}
 
-	n, err := s.Resolve(result.Fingerprint[:8])
+	rr, err := s.Resolve(result.Fingerprint[:8])
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if n != 1 {
-		t.Fatalf("expected 1 resolved, got %d", n)
+	if rr.Matched != 1 {
+		t.Fatalf("expected 1 resolved, got %d", rr.Matched)
+	}
+	if rr.Fingerprint != result.Fingerprint {
+		t.Fatalf("expected fingerprint %s, got %s", result.Fingerprint, rr.Fingerprint)
+	}
+	if rr.ResolvedAt == "" {
+		t.Fatal("expected ResolvedAt to be set")
 	}
 
 	// Verify resolved_at is set
@@ -208,12 +214,12 @@ func TestManualResolve(t *testing.T) {
 	}
 
 	// Resolving again should affect 0 rows
-	n, err = s.Resolve(result.Fingerprint[:8])
+	rr, err = s.Resolve(result.Fingerprint[:8])
 	if err != nil {
 		t.Fatalf("resolve again: %v", err)
 	}
-	if n != 0 {
-		t.Fatalf("expected 0 on second resolve, got %d", n)
+	if rr.Matched != 0 {
+		t.Fatalf("expected 0 on second resolve, got %d", rr.Matched)
 	}
 }
 
@@ -242,8 +248,7 @@ func TestRegressionDetection(t *testing.T) {
 	}
 
 	// Resolve it
-	_, err = s.Resolve(result.Fingerprint)
-	if err != nil {
+	if _, err = s.Resolve(result.Fingerprint); err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
 
@@ -471,5 +476,111 @@ func TestNoResolvedDurationForNewError(t *testing.T) {
 	}
 	if result.ResolvedDuration != 0 {
 		t.Fatalf("expected zero ResolvedDuration for new error, got %v", result.ResolvedDuration)
+	}
+}
+
+func TestGetTagDistribution(t *testing.T) {
+	s := setupStore(t)
+
+	event := domain.Event{
+		Exception: &domain.ExceptionData{
+			Values: []domain.ExceptionValue{{
+				Type: "TagDistErr", Value: "tag dist test",
+				Stacktrace: &domain.Stacktrace{Frames: []domain.Frame{{Filename: "td.go", Function: "f", Lineno: 1}}},
+			}},
+		},
+		Tags: map[string]string{"server": "web-1"},
+	}
+
+	result, err := s.StoreEvent(&event)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	// Insert additional occurrences with tags
+	now := time.Now().UTC().Format(time.RFC3339)
+	s.DB.Exec(`INSERT INTO occurrences (fingerprint, timestamp, tags) VALUES (?,?,?)`,
+		result.Fingerprint, now, `{"server":"web-1"}`)
+	s.DB.Exec(`INSERT INTO occurrences (fingerprint, timestamp, tags) VALUES (?,?,?)`,
+		result.Fingerprint, now, `{"server":"web-2"}`)
+
+	dist := s.GetTagDistribution(result.Fingerprint)
+	if dist == nil {
+		t.Fatal("expected non-nil distribution")
+	}
+	serverDist, ok := dist["server"]
+	if !ok {
+		t.Fatal("expected server key in distribution")
+	}
+	if len(serverDist.Values) == 0 {
+		t.Fatal("expected at least one tag value")
+	}
+}
+
+func TestGetTagDistributionEmpty(t *testing.T) {
+	s := setupStore(t)
+
+	event := domain.Event{
+		Exception: &domain.ExceptionData{
+			Values: []domain.ExceptionValue{{
+				Type: "NoTagErr", Value: "no tags",
+				Stacktrace: &domain.Stacktrace{Frames: []domain.Frame{{Filename: "nt.go", Function: "f", Lineno: 1}}},
+			}},
+		},
+	}
+
+	result, err := s.StoreEvent(&event)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	dist := s.GetTagDistribution(result.Fingerprint)
+	if dist != nil {
+		t.Fatalf("expected nil distribution for event with no tags, got %v", dist)
+	}
+}
+
+func TestFindByPrefix(t *testing.T) {
+	s := setupStore(t)
+
+	event := domain.Event{
+		Exception: &domain.ExceptionData{
+			Values: []domain.ExceptionValue{{
+				Type: "PrefixErr", Value: "prefix test",
+				Stacktrace: &domain.Stacktrace{Frames: []domain.Frame{{Filename: "p.go", Function: "f", Lineno: 1}}},
+			}},
+		},
+	}
+
+	result, err := s.StoreEvent(&event)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	// Find by first 8 chars
+	fullFP, err := s.FindByPrefix(result.Fingerprint[:8])
+	if err != nil {
+		t.Fatalf("FindByPrefix: %v", err)
+	}
+	if fullFP != result.Fingerprint {
+		t.Fatalf("expected %s, got %s", result.Fingerprint, fullFP)
+	}
+
+	// Find by full fingerprint
+	fullFP, err = s.FindByPrefix(result.Fingerprint)
+	if err != nil {
+		t.Fatalf("FindByPrefix full: %v", err)
+	}
+	if fullFP != result.Fingerprint {
+		t.Fatalf("expected %s, got %s", result.Fingerprint, fullFP)
+	}
+}
+
+func TestFindByPrefixNotFound(t *testing.T) {
+	s := setupStore(t)
+
+	_, err := s.FindByPrefix("nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent prefix")
 	}
 }

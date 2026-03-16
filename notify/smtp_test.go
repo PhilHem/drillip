@@ -2,8 +2,11 @@ package notify
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/smtp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -857,6 +860,119 @@ func TestDigestPlainTextFormat(t *testing.T) {
 	}
 }
 
+func TestSanitizeHeader(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"strips CR", "hello\rworld", "helloworld"},
+		{"strips LF", "hello\nworld", "helloworld"},
+		{"strips CRLF", "hello\r\nworld", "helloworld"},
+		{"strips multiple", "a\rb\nc\r\nd", "abcd"},
+		{"truncates to 200", strings.Repeat("x", 250), strings.Repeat("x", 200)},
+		{"short string unchanged", "normal subject", "normal subject"},
+		{"empty string", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeHeader(tt.input)
+			if got != tt.want {
+				t.Errorf("sanitizeHeader(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSMTPHeaderInjection(t *testing.T) {
+	// An attacker could craft an exception type containing CRLF sequences
+	// to inject extra headers (e.g. Bcc) into the email.
+	ev := &domain.Event{
+		Exception: &domain.ExceptionData{
+			Values: []domain.ExceptionValue{{
+				Type:  "ValueError\r\nBcc: evil@attacker.com",
+				Value: "injected",
+			}},
+		},
+	}
+
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, nil)
+	var captured []byte
+	n.sendMail = func(_ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
+		captured = msg
+		return nil
+	}
+
+	n.NotifyNewError(ev, "fp1", false, 0)
+
+	msg := string(captured)
+
+	// The CRLF must be stripped so the attacker's Bcc never becomes a
+	// separate header line. Split on \r\n and verify no line starts with "Bcc:".
+	headerEnd := strings.Index(msg, "\r\n\r\n")
+	if headerEnd < 0 {
+		t.Fatal("could not find end of MIME headers")
+	}
+	headers := msg[:headerEnd]
+
+	for _, line := range strings.Split(headers, "\r\n") {
+		if strings.HasPrefix(line, "Bcc:") {
+			t.Errorf("SMTP header injection: found injected header line: %q", line)
+		}
+	}
+
+	// The subject should still contain the sanitized type (without CRLF)
+	if !strings.Contains(headers, "Subject: [drillip] error: ValueError") {
+		t.Errorf("expected sanitized subject line, got headers:\n%s", headers)
+	}
+
+	// The CRLF characters themselves must be gone from the subject
+	if strings.Contains(headers, "Subject: [drillip] error: ValueError\r\n") {
+		t.Error("subject still contains raw CRLF")
+	}
+}
+
+func TestNotifierConcurrentSafety(t *testing.T) {
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, nil)
+	var mu sync.Mutex
+	sendCount := 0
+	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
+		mu.Lock()
+		sendCount++
+		mu.Unlock()
+		return nil
+	}
+
+	const goroutines = 100
+	done := make(chan struct{})
+	for i := 0; i < goroutines; i++ {
+		go func(i int) {
+			defer func() { done <- struct{}{} }()
+			ev := &domain.Event{
+				Exception: &domain.ExceptionData{
+					Values: []domain.ExceptionValue{{
+						Type:  fmt.Sprintf("Error%d", i),
+						Value: "concurrent test",
+					}},
+				},
+			}
+			n.NotifyNewError(ev, fmt.Sprintf("fp%d", i), false, 0)
+		}(i)
+	}
+
+	for i := 0; i < goroutines; i++ {
+		<-done
+	}
+
+	mu.Lock()
+	got := sendCount
+	mu.Unlock()
+
+	if got != goroutines {
+		t.Fatalf("expected %d sends, got %d", goroutines, got)
+	}
+}
+
 func TestDigestTimerFires(t *testing.T) {
 	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 10*time.Millisecond, nil)
 	calls := make(chan int, 1)
@@ -876,3 +992,37 @@ func TestDigestTimerFires(t *testing.T) {
 		t.Fatal("digest timer did not fire within 1 second")
 	}
 }
+
+func TestSendRetriesOnError(t *testing.T) {
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, nil)
+	attempts := 0
+	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
+		attempts++
+		return errors.New("connection refused")
+	}
+
+	n.send("subject", "text", "<html>html</html>")
+
+	if attempts != 3 {
+		t.Fatalf("expected 3 retry attempts, got %d", attempts)
+	}
+}
+
+func TestSendSucceedsOnSecondAttempt(t *testing.T) {
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, nil)
+	attempts := 0
+	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
+		attempts++
+		if attempts < 2 {
+			return errors.New("temporary failure")
+		}
+		return nil
+	}
+
+	n.send("subject", "text", "<html>html</html>")
+
+	if attempts != 2 {
+		t.Fatalf("expected 2 attempts (fail then succeed), got %d", attempts)
+	}
+}
+

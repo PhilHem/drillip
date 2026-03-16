@@ -22,6 +22,9 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 
+	sqlDB.SetMaxOpenConns(2) // SQLite WAL allows 1 writer + concurrent readers, keep pool small
+	sqlDB.SetMaxIdleConns(2)
+
 	_, err = sqlDB.Exec(`
 		PRAGMA journal_mode=WAL;
 		PRAGMA synchronous=NORMAL;
@@ -322,16 +325,111 @@ func (s *Store) PruneExpiredSilences() (int64, error) {
 	return res.RowsAffected()
 }
 
+// ResolveResult holds the outcome of a manual resolve operation.
+type ResolveResult struct {
+	Matched     int64
+	Fingerprint string // full fingerprint of the first matched error
+	ResolvedAt  string
+}
+
 // Resolve manually marks an error as resolved by fingerprint prefix.
-// Returns the number of rows affected.
-func (s *Store) Resolve(fpPrefix string) (int64, error) {
+func (s *Store) Resolve(fpPrefix string) (ResolveResult, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
-	res, err := s.DB.Exec(
+
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return ResolveResult{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.Exec(
 		`UPDATE errors SET resolved_at = ? WHERE fingerprint LIKE ?||'%' AND resolved_at IS NULL`,
 		now, fpPrefix,
 	)
 	if err != nil {
-		return 0, err
+		return ResolveResult{}, err
 	}
-	return res.RowsAffected()
+	n, _ := res.RowsAffected()
+
+	var fullFP string
+	if n > 0 {
+		_ = tx.QueryRow("SELECT fingerprint FROM errors WHERE fingerprint LIKE ?||'%' LIMIT 1", fpPrefix).Scan(&fullFP)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return ResolveResult{}, err
+	}
+
+	return ResolveResult{Matched: n, Fingerprint: fullFP, ResolvedAt: now}, nil
+}
+
+// TagValue holds a single tag value and its occurrence count/percentage.
+type TagValue struct {
+	Value   string `json:"value"`
+	Count   int    `json:"count"`
+	Percent int    `json:"percent"`
+}
+
+// TagDist holds the distribution of values for a single tag key.
+type TagDist struct {
+	Values []TagValue `json:"values"`
+}
+
+// GetTagDistribution returns the distribution of tag values across occurrences
+// for the given fingerprint.
+func (s *Store) GetTagDistribution(fp string) map[string]TagDist {
+	rows, err := s.DB.Query(`SELECT tags FROM occurrences WHERE fingerprint = ? AND tags != '' AND tags IS NOT NULL`, fp)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	dist := map[string]map[string]int{}
+	total := 0
+
+	for rows.Next() {
+		var tagsJSON string
+		if err := rows.Scan(&tagsJSON); err != nil || tagsJSON == "" {
+			continue
+		}
+		var tagMap map[string]string
+		if json.Unmarshal([]byte(tagsJSON), &tagMap) != nil {
+			continue
+		}
+		total++
+		for k, v := range tagMap {
+			if dist[k] == nil {
+				dist[k] = map[string]int{}
+			}
+			dist[k][v]++
+		}
+	}
+
+	if len(dist) == 0 {
+		return nil
+	}
+
+	result := map[string]TagDist{}
+	for k, values := range dist {
+		var td TagDist
+		for v, c := range values {
+			pct := 0
+			if total > 0 {
+				pct = c * 100 / total
+			}
+			td.Values = append(td.Values, TagValue{Value: v, Count: c, Percent: pct})
+		}
+		result[k] = td
+	}
+	return result
+}
+
+// FindByPrefix resolves a fingerprint prefix to the full fingerprint.
+func (s *Store) FindByPrefix(prefix string) (string, error) {
+	var fullFP string
+	err := s.DB.QueryRow("SELECT fingerprint FROM errors WHERE fingerprint LIKE ?||'%' LIMIT 1", prefix).Scan(&fullFP)
+	if err != nil {
+		return "", fmt.Errorf("not found: %s", prefix)
+	}
+	return fullFP, nil
 }

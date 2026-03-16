@@ -143,15 +143,6 @@ func printBar(w io.Writer, label string, value, maxValue, width int) {
 	fmt.Fprintf(w, "%s %s %d\n", label, bar, value)
 }
 
-// parseTag splits "key=value" into (key, value, true) or ("", "", false).
-func parseTag(s string) (string, string, bool) {
-	i := strings.IndexByte(s, '=')
-	if i <= 0 || i == len(s)-1 {
-		return "", "", false
-	}
-	return s[:i], s[i+1:], true
-}
-
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s

@@ -1,6 +1,12 @@
 package domain
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+)
 
 // Sentry event types
 
@@ -96,4 +102,135 @@ type Frame struct {
 
 type BreadcrumbData struct {
 	Values []json.RawMessage `json:"values"`
+}
+
+// validLevels contains the Sentry-recognized severity levels.
+var validLevels = map[string]bool{
+	"fatal":   true,
+	"error":   true,
+	"warning": true,
+	"info":    true,
+	"debug":   true,
+}
+
+// Sanitize clamps oversized fields in-place so the event is safe to store.
+// It truncates rather than rejecting — Sentry SDKs send real data and we
+// should accept it gracefully.
+func (e *Event) Sanitize() {
+	if len(e.Message) > 10000 {
+		e.Message = e.Message[:10000]
+	}
+
+	if e.Level != "" && !validLevels[e.Level] {
+		e.Level = ""
+	}
+
+	if e.Exception != nil {
+		if len(e.Exception.Values) > 10 {
+			e.Exception.Values = e.Exception.Values[:10]
+		}
+		for i := range e.Exception.Values {
+			st := e.Exception.Values[i].Stacktrace
+			if st != nil && len(st.Frames) > 100 {
+				st.Frames = st.Frames[:100]
+			}
+		}
+	}
+
+	if e.Breadcrumbs != nil && len(e.Breadcrumbs.Values) > 100 {
+		e.Breadcrumbs.Values = e.Breadcrumbs.Values[len(e.Breadcrumbs.Values)-100:]
+	}
+
+	if len(e.Tags) > 50 {
+		kept := 0
+		for k := range e.Tags {
+			if kept >= 50 {
+				delete(e.Tags, k)
+			} else {
+				kept++
+			}
+		}
+	}
+	for k, v := range e.Tags {
+		if len(v) > 200 {
+			e.Tags[k] = v[:200]
+		}
+	}
+
+	if e.Request != nil && len(e.Request.URL) > 2000 {
+		e.Request.URL = e.Request.URL[:2000]
+	}
+
+	if len(e.Environment) > 100 {
+		e.Environment = e.Environment[:100]
+	}
+	if len(e.Release) > 200 {
+		e.Release = e.Release[:200]
+	}
+	if len(e.ServerName) > 200 {
+		e.ServerName = e.ServerName[:200]
+	}
+	if len(e.Platform) > 50 {
+		e.Platform = e.Platform[:50]
+	}
+}
+
+// ValidFingerprint reports whether fp is a valid hex fingerprint
+// (1–16 lowercase hex characters).
+func ValidFingerprint(fp string) bool {
+	if len(fp) == 0 || len(fp) > 16 {
+		return false
+	}
+	for _, c := range fp {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
+
+// DeriveState returns "resolved", "new", or "ongoing" based on resolved_at and first_seen.
+func DeriveState(resolvedAt, firstSeen string) string {
+	if resolvedAt != "" {
+		return "resolved"
+	}
+	if t, err := time.Parse(time.RFC3339, firstSeen); err == nil {
+		if time.Since(t) < time.Hour {
+			return "new"
+		}
+	}
+	return "ongoing"
+}
+
+// ParseDuration parses duration strings like "24h", "7d", "1w".
+func ParseDuration(s string) (time.Duration, error) {
+	s = strings.TrimSpace(s)
+	if len(s) < 2 {
+		return 0, fmt.Errorf("invalid duration: %q", s)
+	}
+	suffix := s[len(s)-1]
+	numStr := s[:len(s)-1]
+	n, err := strconv.Atoi(numStr)
+	if err != nil {
+		return 0, fmt.Errorf("invalid duration: %q", s)
+	}
+	switch suffix {
+	case 'h':
+		return time.Duration(n) * time.Hour, nil
+	case 'd':
+		return time.Duration(n) * 24 * time.Hour, nil
+	case 'w':
+		return time.Duration(n) * 7 * 24 * time.Hour, nil
+	default:
+		return 0, fmt.Errorf("unknown suffix %q (use h/d/w)", string(suffix))
+	}
+}
+
+// ParseTag splits "key=value" into (key, value, true) or ("", "", false).
+func ParseTag(s string) (string, string, bool) {
+	i := strings.IndexByte(s, '=')
+	if i <= 0 || i == len(s)-1 {
+		return "", "", false
+	}
+	return s[:i], s[i+1:], true
 }

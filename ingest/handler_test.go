@@ -405,3 +405,22 @@ func TestRegressionTriggersNotification(t *testing.T) {
 		t.Fatalf("expected still 2 notifications (third ingest is neither new nor regression), got %d", atomic.LoadInt32(&notified))
 	}
 }
+
+func TestHandleOversizedPayload(t *testing.T) {
+	s := setupStore(t)
+
+	// Create a body slightly larger than 10 MB
+	oversized := make([]byte, 10<<20+1024)
+	for i := range oversized {
+		oversized[i] = 'A'
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/1/store/", bytes.NewReader(oversized))
+	w := httptest.NewRecorder()
+	MakeHandler(s, nil)(w, req)
+
+	// http.MaxBytesReader causes a 400 (read error) since readBody fails
+	if w.Code != http.StatusBadRequest && w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 400 or 413 for oversized payload, got %d", w.Code)
+	}
+}

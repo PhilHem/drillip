@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/PhilHem/drillip/domain"
 	"github.com/PhilHem/drillip/integrations"
 	"github.com/PhilHem/drillip/store"
 )
@@ -19,42 +19,6 @@ import (
 type CLI struct {
 	DB    *sql.DB
 	Store *store.Store // needed for silence operations
-}
-
-func parseDuration(s string) (time.Duration, error) {
-	s = strings.TrimSpace(s)
-	if len(s) < 2 {
-		return 0, fmt.Errorf("invalid duration: %q", s)
-	}
-	suffix := s[len(s)-1]
-	numStr := s[:len(s)-1]
-	n, err := strconv.Atoi(numStr)
-	if err != nil {
-		return 0, fmt.Errorf("invalid duration: %q", s)
-	}
-	switch suffix {
-	case 'h':
-		return time.Duration(n) * time.Hour, nil
-	case 'd':
-		return time.Duration(n) * 24 * time.Hour, nil
-	case 'w':
-		return time.Duration(n) * 7 * 24 * time.Hour, nil
-	default:
-		return 0, fmt.Errorf("unknown suffix %q (use h/d/w)", string(suffix))
-	}
-}
-
-// deriveState returns "resolved", "new", or "ongoing" based on resolved_at and first_seen.
-func deriveState(resolvedAt, firstSeen string) string {
-	if resolvedAt != "" {
-		return "resolved"
-	}
-	if t, err := time.Parse(time.RFC3339, firstSeen); err == nil {
-		if time.Since(t) < time.Hour {
-			return "new"
-		}
-	}
-	return "ongoing"
 }
 
 func (c *CLI) RunTop(args []string, w io.Writer) {
@@ -72,7 +36,7 @@ func (c *CLI) RunTop(args []string, w io.Writer) {
 		queryArgs = append(queryArgs, *level)
 	}
 	if *tag != "" {
-		if k, v, ok := parseTag(*tag); ok {
+		if k, v, ok := domain.ParseTag(*tag); ok {
 			conditions = append(conditions, `json_extract(tags, '$.'||?) = ?`)
 			queryArgs = append(queryArgs, k, v)
 		}
@@ -98,7 +62,7 @@ func (c *CLI) RunTop(args []string, w io.Writer) {
 			continue
 		}
 		t, _ := time.Parse(time.RFC3339, lastSeen)
-		state := deriveState(resolvedAt, firstSeen)
+		state := domain.DeriveState(resolvedAt, firstSeen)
 		tableRows = append(tableRows, []string{
 			fp[:8], fmt.Sprintf("%d", count), lvl, state, typ, truncate(val, 50), timeAgo(t),
 		})
@@ -129,7 +93,7 @@ func (c *CLI) RunRecent(args []string, w io.Writer) {
 		queryArgs = append(queryArgs, *level)
 	}
 	if *tag != "" {
-		if k, v, ok := parseTag(*tag); ok {
+		if k, v, ok := domain.ParseTag(*tag); ok {
 			query += ` AND json_extract(tags, '$.'||?) = ?`
 			queryArgs = append(queryArgs, k, v)
 		}
@@ -151,7 +115,7 @@ func (c *CLI) RunRecent(args []string, w io.Writer) {
 			continue
 		}
 		t, _ := time.Parse(time.RFC3339, firstSeen)
-		state := deriveState(resolvedAt, firstSeen)
+		state := domain.DeriveState(resolvedAt, firstSeen)
 		tableRows = append(tableRows, []string{
 			fp[:8], fmt.Sprintf("%d", count), lvl, state, typ, truncate(val, 50), timeAgo(t),
 		})
@@ -174,14 +138,20 @@ func (c *CLI) RunShow(args []string, w io.Writer) {
 	}
 	fp := args[0]
 
-	var fullFP, typ, val, lvl, stacktrace, breadcrumbs, release, env, userCtx, tags, platform, firstSeen, lastSeen string
+	fullFP, err := c.Store.FindByPrefix(fp)
+	if err != nil {
+		fmt.Fprintf(w, "error not found: %s\n", fp)
+		return
+	}
+
+	var typ, val, lvl, stacktrace, breadcrumbs, release, env, userCtx, tags, platform, firstSeen, lastSeen string
 	var count int
-	err := c.DB.QueryRow(`
-		SELECT fingerprint, type, value, level, stacktrace, breadcrumbs,
+	err = c.DB.QueryRow(`
+		SELECT type, value, level, stacktrace, breadcrumbs,
 			release_tag, environment, user_context, tags, platform,
 			first_seen, last_seen, count
-		FROM errors WHERE fingerprint LIKE ?||'%' LIMIT 1
-	`, fp).Scan(&fullFP, &typ, &val, &lvl, &stacktrace, &breadcrumbs,
+		FROM errors WHERE fingerprint = ?
+	`, fullFP).Scan(&typ, &val, &lvl, &stacktrace, &breadcrumbs,
 		&release, &env, &userCtx, &tags, &platform,
 		&firstSeen, &lastSeen, &count)
 	if err != nil {
@@ -245,42 +215,14 @@ func (c *CLI) RunShow(args []string, w io.Writer) {
 	}
 
 	// Tag distribution from occurrences
-	c.printTagDistribution(w, fullFP)
+	printTagDistribution(w, c.Store.GetTagDistribution(fullFP))
 
 	printHint(w, "drillip trend "+fullFP[:8], "drillip correlate "+fullFP[:8],
 		"drillip top --tag key=value")
 }
 
 // printTagDistribution shows how tag values are distributed across occurrences.
-func (c *CLI) printTagDistribution(w io.Writer, fp string) {
-	rows, err := c.DB.Query(`SELECT tags FROM occurrences WHERE fingerprint = ? AND tags != '' AND tags IS NOT NULL`, fp)
-	if err != nil {
-		return
-	}
-	defer rows.Close()
-
-	// key -> value -> count
-	dist := map[string]map[string]int{}
-	total := 0
-
-	for rows.Next() {
-		var tagsJSON string
-		if err := rows.Scan(&tagsJSON); err != nil || tagsJSON == "" {
-			continue
-		}
-		var tagMap map[string]string
-		if json.Unmarshal([]byte(tagsJSON), &tagMap) != nil {
-			continue
-		}
-		total++
-		for k, v := range tagMap {
-			if dist[k] == nil {
-				dist[k] = map[string]int{}
-			}
-			dist[k][v]++
-		}
-	}
-
+func printTagDistribution(w io.Writer, dist map[string]store.TagDist) {
 	if len(dist) == 0 {
 		return
 	}
@@ -296,25 +238,15 @@ func (c *CLI) printTagDistribution(w io.Writer, fp string) {
 	sort.Strings(keys)
 
 	for _, k := range keys {
-		values := dist[k]
+		td := dist[k]
 		// Sort values by count descending
-		type kv struct {
-			val   string
-			count int
-		}
-		sorted := make([]kv, 0, len(values))
-		for v, cnt := range values {
-			sorted = append(sorted, kv{v, cnt})
-		}
-		sort.Slice(sorted, func(i, j int) bool { return sorted[i].count > sorted[j].count })
+		sorted := make([]store.TagValue, len(td.Values))
+		copy(sorted, td.Values)
+		sort.Slice(sorted, func(i, j int) bool { return sorted[i].Count > sorted[j].Count })
 
 		fmt.Fprintf(w, "  %s:\n", k)
-		for _, s := range sorted {
-			pct := 0
-			if total > 0 {
-				pct = s.count * 100 / total
-			}
-			fmt.Fprintf(w, "    %s: %d (%d%%)\n", s.val, s.count, pct)
+		for _, tv := range sorted {
+			fmt.Fprintf(w, "    %s: %d (%d%%)\n", tv.Value, tv.Count, tv.Percent)
 		}
 	}
 }
@@ -327,8 +259,8 @@ func (c *CLI) RunTrend(args []string, w io.Writer) {
 	fp := args[0]
 
 	// Resolve full fingerprint
-	var fullFP string
-	if err := c.DB.QueryRow("SELECT fingerprint FROM errors WHERE fingerprint LIKE ?||'%' LIMIT 1", fp).Scan(&fullFP); err != nil {
+	fullFP, err := c.Store.FindByPrefix(fp)
+	if err != nil {
 		fmt.Fprintf(w, "error not found: %s\n", fp)
 		return
 	}
@@ -395,12 +327,19 @@ func (c *CLI) RunCorrelate(args []string, w io.Writer, cfg integrations.Config) 
 		return
 	}
 
+	// Resolve full fingerprint
+	fullFP, err := c.Store.FindByPrefix(fp)
+	if err != nil {
+		fmt.Fprintf(w, "error not found: %s\n", fp)
+		return
+	}
+
 	// Fetch error row
-	var fullFP, typ, val, stacktrace, breadcrumbs, userCtx string
-	err := c.DB.QueryRow(`
-		SELECT fingerprint, type, value, stacktrace, breadcrumbs, user_context
-		FROM errors WHERE fingerprint LIKE ?||'%' LIMIT 1
-	`, fp).Scan(&fullFP, &typ, &val, &stacktrace, &breadcrumbs, &userCtx)
+	var typ, val, stacktrace, breadcrumbs, userCtx string
+	err = c.DB.QueryRow(`
+		SELECT type, value, stacktrace, breadcrumbs, user_context
+		FROM errors WHERE fingerprint = ?
+	`, fullFP).Scan(&typ, &val, &stacktrace, &breadcrumbs, &userCtx)
 	if err != nil {
 		fmt.Fprintf(w, "error not found: %s\n", fp)
 		return
@@ -526,8 +465,8 @@ func (c *CLI) RunReleases(args []string, w io.Writer) {
 	fp := args[0]
 
 	// Resolve full fingerprint
-	var fullFP string
-	if err := c.DB.QueryRow("SELECT fingerprint FROM errors WHERE fingerprint LIKE ?||'%' LIMIT 1", fp).Scan(&fullFP); err != nil {
+	fullFP, err := c.Store.FindByPrefix(fp)
+	if err != nil {
 		fmt.Fprintf(w, "error not found: %s\n", fp)
 		return
 	}
@@ -599,7 +538,7 @@ func (c *CLI) RunGC(args []string, w io.Writer) {
 		return
 	}
 
-	dur, err := parseDuration(args[0])
+	dur, err := domain.ParseDuration(args[0])
 	if err != nil {
 		fmt.Fprintf(w, "%v\n", err)
 		return
@@ -622,22 +561,17 @@ func (c *CLI) RunResolve(args []string, w io.Writer) {
 		return
 	}
 	fpPrefix := args[0]
-	now := time.Now().UTC().Format(time.RFC3339)
 
-	res, err := c.DB.Exec(
-		`UPDATE errors SET resolved_at = ? WHERE fingerprint LIKE ?||'%' AND resolved_at IS NULL`,
-		now, fpPrefix,
-	)
+	result, err := c.Store.Resolve(fpPrefix)
 	if err != nil {
 		fmt.Fprintf(w, "error: %v\n", err)
 		return
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
+	if result.Matched == 0 {
 		fmt.Fprintf(w, "no unresolved error matching %s\n", fpPrefix)
 		return
 	}
-	fmt.Fprintf(w, "resolved %d error(s) matching %s\n", n, fpPrefix)
+	fmt.Fprintf(w, "resolved %d error(s) matching %s\n", result.Matched, fpPrefix)
 }
 
 func (c *CLI) RunSilence(args []string, w io.Writer) {
@@ -655,7 +589,7 @@ func (c *CLI) RunSilence(args []string, w io.Writer) {
 
 	var expiresAt *time.Time
 	if len(remaining) > 1 {
-		dur, err := parseDuration(remaining[1])
+		dur, err := domain.ParseDuration(remaining[1])
 		if err != nil {
 			fmt.Fprintf(w, "invalid duration: %v\n", err)
 			return

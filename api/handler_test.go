@@ -99,7 +99,7 @@ func TestAPIShow(t *testing.T) {
 		t.Fatalf("store: %v", err)
 	}
 
-	h := &Handler{DB: s.DB}
+	h := &Handler{DB: s.DB, Store: s}
 	req := httptest.NewRequest(http.MethodGet, "/api/0/show/"+result.Fingerprint[:8]+"/", nil)
 	w := httptest.NewRecorder()
 	h.HandleShow(w, req)
@@ -118,7 +118,7 @@ func TestAPIShow(t *testing.T) {
 
 func TestAPIShowNotFound(t *testing.T) {
 	s := setupStore(t)
-	h := &Handler{DB: s.DB}
+	h := &Handler{DB: s.DB, Store: s}
 	req := httptest.NewRequest(http.MethodGet, "/api/0/show/nonexistent/", nil)
 	w := httptest.NewRecorder()
 	h.HandleShow(w, req)
@@ -198,7 +198,7 @@ func TestAPITrend(t *testing.T) {
 		t.Fatalf("store: %v", err)
 	}
 
-	h := &Handler{DB: s.DB}
+	h := &Handler{DB: s.DB, Store: s}
 	req := httptest.NewRequest(http.MethodGet, "/api/0/trend/"+sr.Fingerprint[:8]+"/", nil)
 	w := httptest.NewRecorder()
 	h.HandleTrend(w, req)
@@ -231,7 +231,7 @@ func TestAPIReleases(t *testing.T) {
 		t.Fatalf("store: %v", err)
 	}
 
-	h := &Handler{DB: s.DB}
+	h := &Handler{DB: s.DB, Store: s}
 	req := httptest.NewRequest(http.MethodGet, "/api/0/releases/"+sr.Fingerprint[:8]+"/", nil)
 	w := httptest.NewRecorder()
 	h.HandleReleases(w, req)
@@ -312,7 +312,7 @@ func TestAPIResolve(t *testing.T) {
 		t.Fatalf("store: %v", err)
 	}
 
-	h := &Handler{DB: s.DB}
+	h := &Handler{DB: s.DB, Store: s}
 	req := httptest.NewRequest(http.MethodPost, "/api/0/resolve/"+sr.Fingerprint[:8]+"/", nil)
 	w := httptest.NewRecorder()
 	h.HandleResolve(w, req)
@@ -335,7 +335,7 @@ func TestAPIResolve(t *testing.T) {
 
 func TestAPIResolveNotFound(t *testing.T) {
 	s := setupStore(t)
-	h := &Handler{DB: s.DB}
+	h := &Handler{DB: s.DB, Store: s}
 	req := httptest.NewRequest(http.MethodPost, "/api/0/resolve/nonexistent/", nil)
 	w := httptest.NewRecorder()
 	h.HandleResolve(w, req)
@@ -465,7 +465,7 @@ func TestAPISilenceRequiresPostOrDelete(t *testing.T) {
 
 func TestAPIResolveRequiresPost(t *testing.T) {
 	s := setupStore(t)
-	h := &Handler{DB: s.DB}
+	h := &Handler{DB: s.DB, Store: s}
 	req := httptest.NewRequest(http.MethodGet, "/api/0/resolve/abc/", nil)
 	w := httptest.NewRecorder()
 	h.HandleResolve(w, req)
@@ -515,7 +515,7 @@ func TestAPIShowIncludesState(t *testing.T) {
 		t.Fatalf("store: %v", err)
 	}
 
-	h := &Handler{DB: s.DB}
+	h := &Handler{DB: s.DB, Store: s}
 	req := httptest.NewRequest(http.MethodGet, "/api/0/show/"+sr.Fingerprint[:8]+"/", nil)
 	w := httptest.NewRecorder()
 	h.HandleShow(w, req)

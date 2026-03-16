@@ -5,16 +5,16 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/PhilHem/drillip/api"
 	"github.com/PhilHem/drillip/cli"
+	"github.com/PhilHem/drillip/domain"
 	"github.com/PhilHem/drillip/ingest"
 	"github.com/PhilHem/drillip/integrations"
 	"github.com/PhilHem/drillip/notify"
@@ -84,46 +84,37 @@ func loadConfig() Config {
 	if v := os.Getenv("DRILLIP_SMTP_COOLDOWN"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			cfg.SMTPCooldown = d
+		} else {
+			slog.Warn("invalid DRILLIP_SMTP_COOLDOWN, using default", "value", v, "default", cfg.SMTPCooldown)
 		}
 	}
 	cfg.SMTPDigest = 5 * time.Minute // default
 	if v := os.Getenv("DRILLIP_SMTP_DIGEST"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			cfg.SMTPDigest = d
+		} else {
+			slog.Warn("invalid DRILLIP_SMTP_DIGEST, using default", "value", v, "default", cfg.SMTPDigest)
 		}
 	}
 	cfg.ResolveAfter = 24 * time.Hour // default
 	if v := os.Getenv("DRILLIP_RESOLVE_AFTER"); v != "" {
-		if d, err := parseResolveDuration(v); err == nil {
+		if d, err := domain.ParseDuration(v); err == nil {
 			cfg.ResolveAfter = d
+		} else {
+			slog.Warn("invalid DRILLIP_RESOLVE_AFTER, using default", "value", v, "default", cfg.ResolveAfter)
 		}
 	}
 	return cfg
 }
 
-// parseResolveDuration parses duration strings like "24h", "7d", "1w".
-func parseResolveDuration(s string) (time.Duration, error) {
-	s = strings.TrimSpace(s)
-	if len(s) < 2 {
-		return 0, fmt.Errorf("invalid duration: %q", s)
+func validateConfig(cfg Config) {
+	if cfg.SMTP.Host != "" && cfg.SMTP.To == "" {
+		slog.Warn("DRILLIP_SMTP_HOST set but DRILLIP_SMTP_TO empty, notifications disabled")
 	}
-	suffix := s[len(s)-1]
-	numStr := s[:len(s)-1]
-	n, err := strconv.Atoi(numStr)
-	if err != nil {
-		// Fall back to time.ParseDuration for standard Go durations
-		return time.ParseDuration(s)
+	if cfg.SMTP.Host != "" && cfg.SMTP.From == "" {
+		slog.Warn("DRILLIP_SMTP_HOST set but DRILLIP_SMTP_FROM empty")
 	}
-	switch suffix {
-	case 'h':
-		return time.Duration(n) * time.Hour, nil
-	case 'd':
-		return time.Duration(n) * 24 * time.Hour, nil
-	case 'w':
-		return time.Duration(n) * 7 * 24 * time.Hour, nil
-	default:
-		return time.ParseDuration(s)
-	}
+	slog.Info("config loaded", "db", cfg.DB, "addr", cfg.Addr, "resolve_after", cfg.ResolveAfter, "cooldown", cfg.SMTPCooldown, "digest", cfg.SMTPDigest)
 }
 
 func runHealthCmd(cfg Config) {
@@ -149,7 +140,7 @@ func runServe(cfg Config) {
 	var notifier *notify.Notifier
 	if cfg.SMTP.Enabled() {
 		notifier = notify.NewNotifier(cfg.SMTP, cfg.Project, cfg.SMTPCooldown, cfg.SMTPDigest, s)
-		log.Printf("email notifications enabled (to: %s via %s, cooldown: %s, digest: %s)", cfg.SMTP.To, cfg.SMTP.Addr(), cfg.SMTPCooldown, cfg.SMTPDigest)
+		slog.Info("email notifications enabled", "to", cfg.SMTP.To, "via", cfg.SMTP.Addr(), "cooldown", cfg.SMTPCooldown, "digest", cfg.SMTPDigest)
 	}
 
 	apiHandler := &api.Handler{DB: s.DB, Store: s}
@@ -182,14 +173,14 @@ func runServe(cfg Config) {
 			case <-ticker.C:
 				n, err := s.AutoResolve(cfg.ResolveAfter)
 				if err != nil {
-					log.Printf("auto-resolve error: %v", err)
+					slog.Error("auto-resolve error", "err", err)
 				} else if n > 0 {
-					log.Printf("auto-resolved %d error(s) (older than %s)", n, cfg.ResolveAfter)
+					slog.Info("auto-resolved errors", "count", n, "older_than", cfg.ResolveAfter)
 				}
 				if pruned, err := s.PruneExpiredSilences(); err != nil {
-					log.Printf("prune silences error: %v", err)
+					slog.Error("prune silences error", "err", err)
 				} else if pruned > 0 {
-					log.Printf("pruned %d expired silence(s)", pruned)
+					slog.Info("pruned expired silences", "count", pruned)
 				}
 			case <-stopResolve:
 				return
@@ -202,12 +193,12 @@ func runServe(cfg Config) {
 	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
 		<-stop
-		log.Println("shutting down...")
+		slog.Info("shutting down")
 		close(stopResolve)
 		_ = srv.Shutdown(context.Background())
 	}()
 
-	log.Printf("drillip listening on %s (db: %s)", cfg.Addr, cfg.DB)
+	slog.Info("drillip listening", "addr", cfg.Addr, "db", cfg.DB)
 	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
@@ -216,7 +207,7 @@ func runServe(cfg Config) {
 		notifier.Close()
 	}
 	_ = s.Checkpoint()
-	log.Println("WAL checkpoint complete")
+	slog.Info("WAL checkpoint complete")
 	s.Close()
 }
 
@@ -235,6 +226,8 @@ func main() {
 	if *addrFlag != "" {
 		cfg.Addr = *addrFlag
 	}
+
+	validateConfig(cfg)
 
 	remaining := globalFlags.Args()
 

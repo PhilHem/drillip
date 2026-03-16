@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
-	"log"
+	"log/slog"
 	"net"
 	"net/smtp"
 	"sort"
@@ -131,7 +131,7 @@ func (n *Notifier) NotifyNewError(ev *domain.Event, fp string, regression bool, 
 	}
 
 	if n.Store != nil && n.Store.IsSilenced(fp) {
-		log.Printf("notify: silenced fingerprint %s, skipping", fp[:8])
+		slog.Info("notify: silenced fingerprint, skipping", "fingerprint", fp[:8])
 		return
 	}
 
@@ -139,7 +139,7 @@ func (n *Notifier) NotifyNewError(ev *domain.Event, fp string, regression bool, 
 	ok := n.shouldNotify(fp)
 	if !ok {
 		n.mu.Unlock()
-		log.Printf("notify: throttled notification for fingerprint %s", fp)
+		slog.Info("notify: throttled notification", "fingerprint", fp)
 		return
 	}
 
@@ -169,11 +169,11 @@ func (n *Notifier) sendIndividual(ev *domain.Event, fp string, regression bool, 
 	var subject, htmlBody, textBody string
 
 	if regression {
-		subject = fmt.Sprintf("[drillip] regression: %s", evType)
+		subject = sanitizeHeader(fmt.Sprintf("[drillip] regression: %s", evType))
 		htmlBody = formatHTMLEmail(ev, fp, n.Project, true, resolvedFor)
 		textBody = formatPlainEmail(ev, fp, n.Project, true, resolvedFor)
 	} else {
-		subject = fmt.Sprintf("[drillip] %s: %s", ev.EffectiveLevel(), evType)
+		subject = sanitizeHeader(fmt.Sprintf("[drillip] %s: %s", ev.EffectiveLevel(), evType))
 		htmlBody = formatHTMLEmail(ev, fp, n.Project, false, 0)
 		textBody = formatPlainEmail(ev, fp, n.Project, false, 0)
 	}
@@ -181,7 +181,7 @@ func (n *Notifier) sendIndividual(ev *domain.Event, fp string, regression bool, 
 	n.send(subject, textBody, htmlBody)
 }
 
-// send transmits an email via SMTP.
+// send transmits an email via SMTP with retry and exponential backoff.
 func (n *Notifier) send(subject, textBody, htmlBody string) {
 	msg := buildMultipartMIME(n.SMTP.From, n.SMTP.To, subject, textBody, htmlBody)
 
@@ -190,14 +190,23 @@ func (n *Notifier) send(subject, textBody, htmlBody string) {
 		auth = smtp.PlainAuth("", n.SMTP.User, n.SMTP.Pass, n.SMTP.Host)
 	}
 
-	sendFn := smtp.SendMail
-	if n.sendMail != nil {
-		sendFn = n.sendMail
+	sendFn := n.sendMail
+	if sendFn == nil {
+		sendFn = smtp.SendMail
 	}
 
-	if err := sendFn(n.SMTP.Addr(), auth, n.SMTP.From, []string{n.SMTP.To}, msg); err != nil {
-		log.Printf("notify: send mail: %v", err)
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * 2 * time.Second) // 2s, 4s backoff
+		}
+		err = sendFn(n.SMTP.Addr(), auth, n.SMTP.From, []string{n.SMTP.To}, msg)
+		if err == nil {
+			return
+		}
+		slog.Error("notify: send attempt failed", "attempt", attempt+1, "err", err)
 	}
+	slog.Error("notify: send failed after 3 attempts", "err", err)
 }
 
 // flush sends all pending notifications as a digest (or individual if only one).
@@ -205,6 +214,10 @@ func (n *Notifier) flush() {
 	n.mu.Lock()
 	items := n.pending
 	n.pending = nil
+	if n.timer != nil {
+		n.timer.Stop()
+		n.timer = nil
+	}
 	n.mu.Unlock()
 
 	if len(items) == 0 {
@@ -217,7 +230,7 @@ func (n *Notifier) flush() {
 		return
 	}
 
-	subject := fmt.Sprintf("[drillip] %d new errors in %s", len(items), n.Project)
+	subject := sanitizeHeader(fmt.Sprintf("[drillip] %d new errors in %s", len(items), n.Project))
 	htmlBody := formatDigestHTMLEmail(items, n.Project)
 	textBody := formatDigestPlainEmail(items)
 	n.send(subject, textBody, htmlBody)
@@ -791,15 +804,27 @@ func formatPlainEmail(ev *domain.Event, fp, project string, isRegression bool, r
 	return b.String()
 }
 
+// --- Header sanitization ---
+
+// sanitizeHeader strips CR and LF characters to prevent SMTP header injection
+// and truncates to 200 characters.
+func sanitizeHeader(s string) string {
+	s = strings.NewReplacer("\r", "", "\n", "").Replace(s)
+	if len(s) > 200 {
+		s = s[:200]
+	}
+	return s
+}
+
 // --- MIME ---
 
 func buildMultipartMIME(from, to, subject, textBody, htmlBody string) []byte {
 	boundary := "drillip-boundary-" + fmt.Sprintf("%d", time.Now().UnixNano())
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("From: %s\r\n", from))
-	b.WriteString(fmt.Sprintf("To: %s\r\n", to))
-	b.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
+	b.WriteString(fmt.Sprintf("From: %s\r\n", sanitizeHeader(from)))
+	b.WriteString(fmt.Sprintf("To: %s\r\n", sanitizeHeader(to)))
+	b.WriteString(fmt.Sprintf("Subject: %s\r\n", sanitizeHeader(subject)))
 	b.WriteString("MIME-Version: 1.0\r\n")
 	b.WriteString(fmt.Sprintf("Content-Type: multipart/alternative; boundary=\"%s\"\r\n", boundary))
 	b.WriteString("\r\n")

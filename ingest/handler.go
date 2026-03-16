@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -62,18 +62,27 @@ func readBody(r *http.Request) ([]byte, error) {
 	return io.ReadAll(reader)
 }
 
+// writeError writes a structured JSON error response.
+func writeError(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
 // MakeHandler returns an http.HandlerFunc that ingests Sentry events.
 // If notifier is nil, notifications are skipped.
 func MakeHandler(s *store.Store, notifier *notify.Notifier) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 
+		r.Body = http.MaxBytesReader(w, r.Body, 10<<20) // 10 MB
+
 		body, err := readBody(r)
 		if err != nil {
-			http.Error(w, "bad request", http.StatusBadRequest)
+			writeError(w, http.StatusBadRequest, "bad request")
 			return
 		}
 		defer r.Body.Close()
@@ -83,11 +92,13 @@ func MakeHandler(s *store.Store, notifier *notify.Notifier) http.HandlerFunc {
 		if err != nil {
 			var ev domain.Event
 			if jsonErr := json.Unmarshal(body, &ev); jsonErr != nil {
-				http.Error(w, "invalid payload", http.StatusBadRequest)
+				writeError(w, http.StatusBadRequest, "invalid payload")
 				return
 			}
 			event = &ev
 		}
+
+		event.Sanitize()
 
 		// Need either an exception or a message to store
 		hasException := event.Exception != nil && len(event.Exception.Values) > 0
@@ -100,8 +111,8 @@ func MakeHandler(s *store.Store, notifier *notify.Notifier) http.HandlerFunc {
 
 		result, err := s.StoreEvent(event)
 		if err != nil {
-			log.Printf("store event: %v", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			slog.Error("store event", "err", err)
+			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
 
@@ -119,7 +130,7 @@ func MakeHandler(s *store.Store, notifier *notify.Notifier) http.HandlerFunc {
 func HandleHealth(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := db.Ping(); err != nil {
-			http.Error(w, "db unhealthy", http.StatusServiceUnavailable)
+			writeError(w, http.StatusServiceUnavailable, "db unhealthy")
 			return
 		}
 		_, _ = w.Write([]byte("ok"))
