@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/andybalholm/brotli"
 )
 
 func setupTestDB(t *testing.T) {
@@ -130,6 +133,89 @@ func TestHandleEnvelopeEvent(t *testing.T) {
 	}
 	if typ != "ValueError" || release != "v2.0.0" {
 		t.Fatalf("unexpected: type=%q release=%q", typ, release)
+	}
+}
+
+func TestHandleBrotliEnvelope(t *testing.T) {
+	setupTestDB(t)
+
+	event := Event{
+		EventID: "br-789",
+		Release: "v3.0.0",
+		Exception: &ExceptionData{
+			Values: []ExceptionValue{{
+				Type:  "BrotliError",
+				Value: "compressed payload",
+			}},
+		},
+	}
+
+	eventJSON, _ := json.Marshal(event)
+	envelope := `{"event_id":"br-789","dsn":"http://key@localhost:8300/1"}` + "\n" +
+		`{"type":"event","content_type":"application/json","length":` + fmt.Sprintf("%d", len(eventJSON)) + `}` + "\n" +
+		string(eventJSON) + "\n"
+
+	var buf bytes.Buffer
+	bw := brotli.NewWriter(&buf)
+	bw.Write([]byte(envelope))
+	bw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/1/envelope/", &buf)
+	req.Header.Set("Content-Encoding", "br")
+	w := httptest.NewRecorder()
+	handleIngest(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var typ string
+	if err := db.QueryRow("SELECT type FROM errors WHERE type = 'BrotliError'").Scan(&typ); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if typ != "BrotliError" {
+		t.Fatalf("expected BrotliError, got %q", typ)
+	}
+}
+
+func TestHandleGzipEnvelope(t *testing.T) {
+	setupTestDB(t)
+
+	event := Event{
+		EventID: "gz-789",
+		Exception: &ExceptionData{
+			Values: []ExceptionValue{{
+				Type:  "GzipError",
+				Value: "compressed payload",
+			}},
+		},
+	}
+
+	eventJSON, _ := json.Marshal(event)
+	envelope := `{"event_id":"gz-789","dsn":"http://key@localhost:8300/1"}` + "\n" +
+		`{"type":"event","content_type":"application/json","length":` + fmt.Sprintf("%d", len(eventJSON)) + `}` + "\n" +
+		string(eventJSON) + "\n"
+
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	gw.Write([]byte(envelope))
+	gw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/1/envelope/", &buf)
+	req.Header.Set("Content-Encoding", "gzip")
+	w := httptest.NewRecorder()
+	handleIngest(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var typ string
+	if err := db.QueryRow("SELECT type FROM errors WHERE type = 'GzipError'").Scan(&typ); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if typ != "GzipError" {
+		t.Fatalf("expected GzipError, got %q", typ)
 	}
 }
 

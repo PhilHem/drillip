@@ -2,7 +2,10 @@ module github.com/PhilHem/drillip
 
 go 1.26
 
-require modernc.org/sqlite v1.46.1
+require (
+	github.com/andybalholm/brotli v1.2.0
+	modernc.org/sqlite v1.46.1
+)
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect

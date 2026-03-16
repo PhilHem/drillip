@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/andybalholm/brotli"
 )
 
 func parseEnvelope(body []byte) (*Event, error) {
@@ -37,13 +39,16 @@ func parseEnvelope(body []byte) (*Event, error) {
 
 func readBody(r *http.Request) ([]byte, error) {
 	var reader io.Reader = r.Body
-	if r.Header.Get("Content-Encoding") == "gzip" {
+	switch r.Header.Get("Content-Encoding") {
+	case "gzip":
 		gz, err := gzip.NewReader(r.Body)
 		if err != nil {
 			return nil, err
 		}
 		defer gz.Close()
 		reader = gz
+	case "br":
+		reader = brotli.NewReader(r.Body)
 	}
 	return io.ReadAll(reader)
 }
