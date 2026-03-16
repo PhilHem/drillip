@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.3.1 - 2026-03-16
+
+### Fixed
+
+- SMTP headers are sanitized to prevent header injection via crafted exception types (#6)
+- Request body limited to 10MB to prevent memory exhaustion from oversized payloads (#7)
+- Race condition in notification digest buffer fixed — concurrent sends no longer risk panics (#8)
+- API resolve and silence handlers now use atomic store operations instead of raw multi-statement SQL (#9)
+- Wildcard CORS header removed — Drillip is localhost-only and doesn't need cross-origin access (#10)
+
+### Added
+
+- Events are sanitized at ingest — oversized fields (message, breadcrumbs, stacktrace frames, tags) are truncated to safe limits (#11)
+- Shared query logic centralized — tag distribution, prefix lookup, state derivation, and duration parsing live in one place instead of being duplicated across API and CLI (#12)
+- API and ingest errors now return structured JSON (`{"error": "message"}`) instead of plain text (#13)
+- Failed email sends are retried up to 3 times with exponential backoff (#14)
+- Invalid or partial configuration is detected at startup with clear warnings (#15)
+- Logging migrated to structured format (`log/slog`) with key-value fields (#16)
+- SQLite connection pool tuned for WAL mode concurrency (#17)
+
 ## v0.3.0 - 2026-03-16
 
 ### Added
