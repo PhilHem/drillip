@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/PhilHem/drillip/domain"
+	"github.com/PhilHem/drillip/store"
 )
 
 // SMTPConfig holds email notification settings.
@@ -44,6 +45,7 @@ type Notifier struct {
 	SMTP     SMTPConfig
 	Project  string
 	Cooldown time.Duration
+	Store    *store.Store // for silence checks
 
 	mu       sync.Mutex
 	lastSent time.Time
@@ -54,12 +56,13 @@ type Notifier struct {
 	sendMail func(addr string, a smtp.Auth, from string, to []string, msg []byte) error
 }
 
-// NewNotifier creates a Notifier with the given SMTP config, project name, and cooldown duration.
-func NewNotifier(smtp SMTPConfig, project string, cooldown time.Duration) *Notifier {
+// NewNotifier creates a Notifier with the given SMTP config, project name, cooldown duration, and store.
+func NewNotifier(smtpCfg SMTPConfig, project string, cooldown time.Duration, st *store.Store) *Notifier {
 	return &Notifier{
-		SMTP:     smtp,
+		SMTP:     smtpCfg,
 		Project:  project,
 		Cooldown: cooldown,
+		Store:    st,
 		recent:   make(map[string]time.Time),
 	}
 }
@@ -109,6 +112,11 @@ func (n *Notifier) shouldNotify(fp string) bool {
 // Safe to call from a goroutine.
 func (n *Notifier) NotifyNewError(ev *domain.Event, fp string, regression bool, resolvedFor time.Duration) {
 	if !n.SMTP.Enabled() {
+		return
+	}
+
+	if n.Store != nil && n.Store.IsSilenced(fp) {
+		log.Printf("notify: silenced fingerprint %s, skipping", fp[:8])
 		return
 	}
 

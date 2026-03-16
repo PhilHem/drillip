@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/PhilHem/drillip/domain"
+	"github.com/PhilHem/drillip/store"
 )
 
 func TestSMTPConfigDisabledByDefault(t *testing.T) {
@@ -224,13 +225,13 @@ func TestBuildMultipartMIME(t *testing.T) {
 
 func TestNotifyNoopWhenDisabled(t *testing.T) {
 	ev := &domain.Event{Message: "test"}
-	n := NewNotifier(SMTPConfig{}, "", 0)
+	n := NewNotifier(SMTPConfig{}, "", 0, nil)
 	// Should not panic or send when SMTP is disabled
 	n.NotifyNewError(ev, "abc123", false, 0)
 }
 
 func TestNewNotifierZeroCooldownSendsImmediately(t *testing.T) {
-	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0)
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, nil)
 	calls := 0
 	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
 		calls++
@@ -246,7 +247,7 @@ func TestNewNotifierZeroCooldownSendsImmediately(t *testing.T) {
 
 func TestSameFingerPrintThrottled(t *testing.T) {
 	now := time.Now()
-	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 10*time.Second)
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 10*time.Second, nil)
 	n.now = func() time.Time { return now }
 	calls := 0
 	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
@@ -265,7 +266,7 @@ func TestSameFingerPrintThrottled(t *testing.T) {
 
 func TestSameFingerPrintSendsAfterCooldown(t *testing.T) {
 	now := time.Now()
-	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 10*time.Second)
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 10*time.Second, nil)
 	n.now = func() time.Time { return now }
 	calls := 0
 	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
@@ -287,7 +288,7 @@ func TestSameFingerPrintSendsAfterCooldown(t *testing.T) {
 
 func TestDifferentFingerprintsThrottledByGlobalCooldown(t *testing.T) {
 	now := time.Now()
-	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 10*time.Second)
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 10*time.Second, nil)
 	n.now = func() time.Time { return now }
 	calls := 0
 	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
@@ -306,7 +307,7 @@ func TestDifferentFingerprintsThrottledByGlobalCooldown(t *testing.T) {
 
 func TestShouldNotifyPrunesOldEntries(t *testing.T) {
 	now := time.Now()
-	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 10*time.Second)
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 10*time.Second, nil)
 	n.now = func() time.Time { return now }
 
 	// Manually populate recent map with stale entries
@@ -481,7 +482,7 @@ func TestFormatPlainEmailNoRegression(t *testing.T) {
 }
 
 func TestNotifyRegressionSubject(t *testing.T) {
-	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0)
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, nil)
 	var captured []byte
 	n.sendMail = func(_ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
 		captured = msg
@@ -503,7 +504,7 @@ func TestNotifyRegressionSubject(t *testing.T) {
 }
 
 func TestNotifyNewErrorSubject(t *testing.T) {
-	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0)
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, nil)
 	var captured []byte
 	n.sendMail = func(_ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
 		captured = msg
@@ -541,5 +542,54 @@ func TestFormatDuration(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("formatDuration(%v) = %q, want %q", tt.d, got, tt.want)
 		}
+	}
+}
+
+func TestSilencedFingerprintSkipsNotification(t *testing.T) {
+	s, err := store.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, s)
+	calls := 0
+	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
+		calls++
+		return nil
+	}
+
+	fp := "silenced12345678"
+	if err := s.Silence(fp, nil, "test silence"); err != nil {
+		t.Fatalf("silence: %v", err)
+	}
+
+	ev := &domain.Event{Message: "test"}
+	n.NotifyNewError(ev, fp, false, 0)
+
+	if calls != 0 {
+		t.Fatalf("expected 0 sends for silenced fingerprint, got %d", calls)
+	}
+}
+
+func TestNonSilencedFingerprintSendsNotification(t *testing.T) {
+	s, err := store.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, s)
+	calls := 0
+	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
+		calls++
+		return nil
+	}
+
+	ev := &domain.Event{Message: "test"}
+	n.NotifyNewError(ev, "notsilenced12345", false, 0)
+
+	if calls != 1 {
+		t.Fatalf("expected 1 send for non-silenced fingerprint, got %d", calls)
 	}
 }

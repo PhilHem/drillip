@@ -502,6 +502,130 @@ func TestRunTopShowsState(t *testing.T) {
 	}
 }
 
+// --- silence ---
+
+func TestRunSilence(t *testing.T) {
+	s := setupStore(t)
+	c := &CLI{DB: s.DB, Store: s}
+
+	var buf bytes.Buffer
+	c.RunSilence([]string{"abc123"}, &buf)
+	out := buf.String()
+	if !strings.Contains(out, "silenced abc123 permanently") {
+		t.Fatalf("expected permanent silence message: %s", out)
+	}
+
+	if !s.IsSilenced("abc123") {
+		t.Fatal("expected fingerprint to be silenced")
+	}
+}
+
+func TestRunSilenceWithDuration(t *testing.T) {
+	s := setupStore(t)
+	c := &CLI{DB: s.DB, Store: s}
+
+	var buf bytes.Buffer
+	c.RunSilence([]string{"dur123", "2h"}, &buf)
+	out := buf.String()
+	if !strings.Contains(out, "silenced dur123 until") {
+		t.Fatalf("expected timed silence message: %s", out)
+	}
+
+	if !s.IsSilenced("dur123") {
+		t.Fatal("expected fingerprint to be silenced")
+	}
+}
+
+func TestRunSilenceWithReason(t *testing.T) {
+	s := setupStore(t)
+	c := &CLI{DB: s.DB, Store: s}
+
+	var buf bytes.Buffer
+	c.RunSilence([]string{"--reason", "maintenance", "rsn123"}, &buf)
+	out := buf.String()
+	if !strings.Contains(out, "silenced rsn123 permanently") {
+		t.Fatalf("expected permanent silence message: %s", out)
+	}
+
+	entries, _ := s.ListSilences()
+	found := false
+	for _, e := range entries {
+		if e.Fingerprint == "rsn123" && e.Reason == "maintenance" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("expected silence with reason 'maintenance'")
+	}
+}
+
+func TestRunSilenceNoArgs(t *testing.T) {
+	s := setupStore(t)
+	c := &CLI{DB: s.DB, Store: s}
+
+	var buf bytes.Buffer
+	c.RunSilence(nil, &buf)
+	if !strings.Contains(buf.String(), "usage") {
+		t.Fatalf("expected usage: %s", buf.String())
+	}
+}
+
+func TestRunSilences(t *testing.T) {
+	s := setupStore(t)
+	c := &CLI{DB: s.DB, Store: s}
+
+	_ = s.Silence("sil111", nil, "test reason")
+
+	var buf bytes.Buffer
+	c.RunSilences(nil, &buf)
+	out := buf.String()
+	if !strings.Contains(out, "sil111") {
+		t.Fatalf("missing fingerprint in silences: %s", out)
+	}
+	if !strings.Contains(out, "test reason") {
+		t.Fatalf("missing reason in silences: %s", out)
+	}
+}
+
+func TestRunSilencesEmpty(t *testing.T) {
+	s := setupStore(t)
+	c := &CLI{DB: s.DB, Store: s}
+
+	var buf bytes.Buffer
+	c.RunSilences(nil, &buf)
+	if !strings.Contains(buf.String(), "no active silences") {
+		t.Fatalf("expected empty message: %s", buf.String())
+	}
+}
+
+func TestRunUnsilence(t *testing.T) {
+	s := setupStore(t)
+	c := &CLI{DB: s.DB, Store: s}
+
+	_ = s.Silence("unsil123", nil, "")
+
+	var buf bytes.Buffer
+	c.RunUnsilence([]string{"unsil123"}, &buf)
+	if !strings.Contains(buf.String(), "unsilenced unsil123") {
+		t.Fatalf("expected unsilence confirmation: %s", buf.String())
+	}
+
+	if s.IsSilenced("unsil123") {
+		t.Fatal("expected fingerprint to no longer be silenced")
+	}
+}
+
+func TestRunUnsilenceNoArgs(t *testing.T) {
+	s := setupStore(t)
+	c := &CLI{DB: s.DB, Store: s}
+
+	var buf bytes.Buffer
+	c.RunUnsilence(nil, &buf)
+	if !strings.Contains(buf.String(), "usage") {
+		t.Fatalf("expected usage: %s", buf.String())
+	}
+}
+
 func TestShowTagDistribution(t *testing.T) {
 	s := setupStore(t)
 	c := &CLI{DB: s.DB}

@@ -8,11 +8,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/PhilHem/drillip/store"
 )
 
 // Handler serves the JSON API endpoints.
 type Handler struct {
-	DB *sql.DB
+	DB    *sql.DB
+	Store *store.Store
 }
 
 type apiError struct {
@@ -490,6 +493,82 @@ func (h *Handler) HandleResolve(w http.ResponseWriter, r *http.Request) {
 		"fingerprint": fullFP,
 		"resolved_at": now,
 	})
+}
+
+func (h *Handler) HandleSilence(w http.ResponseWriter, r *http.Request) {
+	fp := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/0/silence/"), "/")
+	if fp == "" {
+		http.Error(w, "missing fingerprint", http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodPost:
+		var expiresAt *time.Time
+		if durStr := r.URL.Query().Get("duration"); durStr != "" {
+			dur, err := parseDuration(durStr)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			t := time.Now().UTC().Add(dur)
+			expiresAt = &t
+		}
+		reason := r.URL.Query().Get("reason")
+
+		if err := h.Store.Silence(fp, expiresAt, reason); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		resp := map[string]interface{}{"fingerprint": fp, "status": "silenced"}
+		if expiresAt != nil {
+			resp["expires_at"] = expiresAt.Format(time.RFC3339)
+		}
+		writeJSON(w, resp)
+
+	case http.MethodDelete:
+		if err := h.Store.Unsilence(fp); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, map[string]interface{}{"fingerprint": fp, "status": "unsilenced"})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+type apiSilence struct {
+	Fingerprint string `json:"fingerprint"`
+	CreatedAt   string `json:"created_at"`
+	ExpiresAt   string `json:"expires_at,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+}
+
+func (h *Handler) HandleListSilences(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	entries, err := h.Store.ListSilences()
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	var results []apiSilence
+	for _, e := range entries {
+		results = append(results, apiSilence{
+			Fingerprint: e.Fingerprint,
+			CreatedAt:   e.CreatedAt,
+			ExpiresAt:   e.ExpiresAt,
+			Reason:      e.Reason,
+		})
+	}
+
+	writeJSON(w, results)
 }
 
 // writeJSON is a helper to write a value as JSON with the appropriate headers.

@@ -12,11 +12,13 @@ import (
 	"time"
 
 	"github.com/PhilHem/drillip/integrations"
+	"github.com/PhilHem/drillip/store"
 )
 
 // CLI holds the database connection for CLI commands.
 type CLI struct {
-	DB *sql.DB
+	DB    *sql.DB
+	Store *store.Store // needed for silence operations
 }
 
 func parseDuration(s string) (time.Duration, error) {
@@ -636,4 +638,77 @@ func (c *CLI) RunResolve(args []string, w io.Writer) {
 		return
 	}
 	fmt.Fprintf(w, "resolved %d error(s) matching %s\n", n, fpPrefix)
+}
+
+func (c *CLI) RunSilence(args []string, w io.Writer) {
+	fs := flag.NewFlagSet("silence", flag.ExitOnError)
+	reason := fs.String("reason", "", "reason for silencing")
+	_ = fs.Parse(args)
+
+	remaining := fs.Args()
+	if len(remaining) == 0 {
+		fmt.Fprintln(w, "usage: drillip silence <fingerprint> [duration] [--reason \"...\"]")
+		return
+	}
+
+	fp := remaining[0]
+
+	var expiresAt *time.Time
+	if len(remaining) > 1 {
+		dur, err := parseDuration(remaining[1])
+		if err != nil {
+			fmt.Fprintf(w, "invalid duration: %v\n", err)
+			return
+		}
+		t := time.Now().UTC().Add(dur)
+		expiresAt = &t
+	}
+
+	if err := c.Store.Silence(fp, expiresAt, *reason); err != nil {
+		fmt.Fprintf(w, "error: %v\n", err)
+		return
+	}
+
+	if expiresAt != nil {
+		fmt.Fprintf(w, "silenced %s until %s\n", fp, expiresAt.Format(time.RFC3339))
+	} else {
+		fmt.Fprintf(w, "silenced %s permanently\n", fp)
+	}
+}
+
+func (c *CLI) RunSilences(_ []string, w io.Writer) {
+	entries, err := c.Store.ListSilences()
+	if err != nil {
+		fmt.Fprintf(w, "error: %v\n", err)
+		return
+	}
+
+	if len(entries) == 0 {
+		fmt.Fprintln(w, "no active silences")
+		return
+	}
+
+	var tableRows [][]string
+	for _, e := range entries {
+		expires := e.ExpiresAt
+		if expires == "" {
+			expires = "permanent"
+		}
+		tableRows = append(tableRows, []string{e.Fingerprint, e.CreatedAt, expires, e.Reason})
+	}
+
+	printTable(w, []string{"FINGERPRINT", "CREATED", "EXPIRES", "REASON"}, tableRows)
+}
+
+func (c *CLI) RunUnsilence(args []string, w io.Writer) {
+	if len(args) == 0 {
+		fmt.Fprintln(w, "usage: drillip unsilence <fingerprint>")
+		return
+	}
+	fp := args[0]
+	if err := c.Store.Unsilence(fp); err != nil {
+		fmt.Fprintf(w, "error: %v\n", err)
+		return
+	}
+	fmt.Fprintf(w, "unsilenced %s\n", fp)
 }

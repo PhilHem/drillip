@@ -344,6 +344,125 @@ func TestAPIResolveNotFound(t *testing.T) {
 	}
 }
 
+func TestAPISilencePost(t *testing.T) {
+	s := setupStore(t)
+	h := &Handler{DB: s.DB, Store: s}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/0/silence/abc123/?duration=24h&reason=maintenance", nil)
+	w := httptest.NewRecorder()
+	h.HandleSilence(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if result["fingerprint"] != "abc123" {
+		t.Fatalf("expected fingerprint abc123, got %v", result["fingerprint"])
+	}
+	if result["status"] != "silenced" {
+		t.Fatalf("expected status silenced, got %v", result["status"])
+	}
+	if result["expires_at"] == nil {
+		t.Fatal("expected expires_at in response")
+	}
+
+	if !s.IsSilenced("abc123") {
+		t.Fatal("expected fingerprint to be silenced")
+	}
+}
+
+func TestAPISilencePermanent(t *testing.T) {
+	s := setupStore(t)
+	h := &Handler{DB: s.DB, Store: s}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/0/silence/perm123/", nil)
+	w := httptest.NewRecorder()
+	h.HandleSilence(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if !s.IsSilenced("perm123") {
+		t.Fatal("expected fingerprint to be silenced")
+	}
+}
+
+func TestAPIUnsilenceDelete(t *testing.T) {
+	s := setupStore(t)
+	h := &Handler{DB: s.DB, Store: s}
+
+	// First silence it
+	_ = s.Silence("del123", nil, "")
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/0/silence/del123/", nil)
+	w := httptest.NewRecorder()
+	h.HandleSilence(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if s.IsSilenced("del123") {
+		t.Fatal("expected fingerprint to no longer be silenced")
+	}
+}
+
+func TestAPIListSilences(t *testing.T) {
+	s := setupStore(t)
+	h := &Handler{DB: s.DB, Store: s}
+
+	_ = s.Silence("list1", nil, "reason1")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/0/silences/", nil)
+	w := httptest.NewRecorder()
+	h.HandleListSilences(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var results []apiSilence
+	if err := json.Unmarshal(w.Body.Bytes(), &results); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 silence, got %d", len(results))
+	}
+	if results[0].Fingerprint != "list1" {
+		t.Fatalf("expected list1, got %s", results[0].Fingerprint)
+	}
+	if results[0].Reason != "reason1" {
+		t.Fatalf("expected reason1, got %s", results[0].Reason)
+	}
+}
+
+func TestAPIListSilencesRequiresGet(t *testing.T) {
+	s := setupStore(t)
+	h := &Handler{DB: s.DB, Store: s}
+	req := httptest.NewRequest(http.MethodPost, "/api/0/silences/", nil)
+	w := httptest.NewRecorder()
+	h.HandleListSilences(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestAPISilenceRequiresPostOrDelete(t *testing.T) {
+	s := setupStore(t)
+	h := &Handler{DB: s.DB, Store: s}
+	req := httptest.NewRequest(http.MethodGet, "/api/0/silence/abc123/", nil)
+	w := httptest.NewRecorder()
+	h.HandleSilence(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", w.Code)
+	}
+}
+
 func TestAPIResolveRequiresPost(t *testing.T) {
 	s := setupStore(t)
 	h := &Handler{DB: s.DB}

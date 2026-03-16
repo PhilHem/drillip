@@ -63,6 +63,15 @@ func Open(path string) (*Store, error) {
 		CREATE INDEX IF NOT EXISTS idx_occ_fp_ts ON occurrences(fingerprint, timestamp);
 		CREATE INDEX IF NOT EXISTS idx_occ_ts ON occurrences(timestamp);
 		CREATE INDEX IF NOT EXISTS idx_occ_trace ON occurrences(trace_id);
+
+		CREATE TABLE IF NOT EXISTS silences (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			fingerprint TEXT NOT NULL,
+			created_at  TEXT NOT NULL,
+			expires_at  TEXT,
+			reason      TEXT
+		);
+		CREATE INDEX IF NOT EXISTS idx_silences_fp ON silences(fingerprint);
 	`)
 	if err != nil {
 		sqlDB.Close()
@@ -234,6 +243,79 @@ func (s *Store) AutoResolve(olderThan time.Duration) (int64, error) {
 		`UPDATE errors SET resolved_at = last_seen WHERE resolved_at IS NULL AND last_seen < ?`,
 		cutoff,
 	)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// SilenceEntry represents an active silence rule.
+type SilenceEntry struct {
+	Fingerprint string
+	CreatedAt   string
+	ExpiresAt   string // empty if permanent
+	Reason      string
+}
+
+// Silence mutes notifications for a fingerprint. If expiresAt is nil, the silence is permanent.
+func (s *Store) Silence(fp string, expiresAt *time.Time, reason string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	var exp interface{}
+	if expiresAt != nil {
+		exp = expiresAt.UTC().Format(time.RFC3339)
+	}
+	_, err := s.DB.Exec(
+		`INSERT INTO silences (fingerprint, created_at, expires_at, reason) VALUES (?, ?, ?, ?)`,
+		fp, now, exp, reason,
+	)
+	return err
+}
+
+// Unsilence removes all silences for a fingerprint.
+func (s *Store) Unsilence(fp string) error {
+	_, err := s.DB.Exec(`DELETE FROM silences WHERE fingerprint = ?`, fp)
+	return err
+}
+
+// ListSilences returns all active (non-expired) silences.
+func (s *Store) ListSilences() ([]SilenceEntry, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	rows, err := s.DB.Query(
+		`SELECT fingerprint, created_at, COALESCE(expires_at, ''), COALESCE(reason, '')
+		 FROM silences
+		 WHERE expires_at IS NULL OR expires_at > ?`, now,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []SilenceEntry
+	for rows.Next() {
+		var e SilenceEntry
+		if err := rows.Scan(&e.Fingerprint, &e.CreatedAt, &e.ExpiresAt, &e.Reason); err != nil {
+			return nil, err
+		}
+		entries = append(entries, e)
+	}
+	return entries, nil
+}
+
+// IsSilenced checks whether a fingerprint is currently silenced.
+func (s *Store) IsSilenced(fp string) bool {
+	now := time.Now().UTC().Format(time.RFC3339)
+	var count int
+	err := s.DB.QueryRow(
+		`SELECT COUNT(*) FROM silences WHERE fingerprint = ? AND (expires_at IS NULL OR expires_at > ?)`,
+		fp, now,
+	).Scan(&count)
+	return err == nil && count > 0
+}
+
+// PruneExpiredSilences removes silences that have passed their expiry time.
+func (s *Store) PruneExpiredSilences() (int64, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := s.DB.Exec(`DELETE FROM silences WHERE expires_at IS NOT NULL AND expires_at < ?`, now)
 	if err != nil {
 		return 0, err
 	}

@@ -314,6 +314,145 @@ func TestRegressionResolvedDuration(t *testing.T) {
 	}
 }
 
+func TestSilencePermanent(t *testing.T) {
+	s := setupStore(t)
+
+	fp := "abc123"
+	if err := s.Silence(fp, nil, "noisy error"); err != nil {
+		t.Fatalf("silence: %v", err)
+	}
+
+	if !s.IsSilenced(fp) {
+		t.Fatal("expected fingerprint to be silenced")
+	}
+
+	// Unrelated fingerprint should not be silenced
+	if s.IsSilenced("other") {
+		t.Fatal("unrelated fingerprint should not be silenced")
+	}
+}
+
+func TestSilenceWithExpiry(t *testing.T) {
+	s := setupStore(t)
+
+	fp := "expiring123"
+
+	// Silence with expiry in the past
+	past := time.Now().UTC().Add(-1 * time.Hour)
+	if err := s.Silence(fp, &past, "already expired"); err != nil {
+		t.Fatalf("silence: %v", err)
+	}
+
+	if s.IsSilenced(fp) {
+		t.Fatal("expired silence should not be active")
+	}
+}
+
+func TestSilenceWithFutureExpiry(t *testing.T) {
+	s := setupStore(t)
+
+	fp := "future123"
+	future := time.Now().UTC().Add(24 * time.Hour)
+	if err := s.Silence(fp, &future, "temporary"); err != nil {
+		t.Fatalf("silence: %v", err)
+	}
+
+	if !s.IsSilenced(fp) {
+		t.Fatal("future-expiry silence should be active")
+	}
+}
+
+func TestUnsilence(t *testing.T) {
+	s := setupStore(t)
+
+	fp := "unsil123"
+	if err := s.Silence(fp, nil, "temporary"); err != nil {
+		t.Fatalf("silence: %v", err)
+	}
+	if !s.IsSilenced(fp) {
+		t.Fatal("expected silenced")
+	}
+
+	if err := s.Unsilence(fp); err != nil {
+		t.Fatalf("unsilence: %v", err)
+	}
+	if s.IsSilenced(fp) {
+		t.Fatal("expected not silenced after unsilence")
+	}
+}
+
+func TestListSilencesExcludesExpired(t *testing.T) {
+	s := setupStore(t)
+
+	// Add permanent silence
+	if err := s.Silence("perm1", nil, "permanent"); err != nil {
+		t.Fatalf("silence: %v", err)
+	}
+
+	// Add expired silence
+	past := time.Now().UTC().Add(-1 * time.Hour)
+	if err := s.Silence("expired1", &past, "old"); err != nil {
+		t.Fatalf("silence: %v", err)
+	}
+
+	// Add future silence
+	future := time.Now().UTC().Add(24 * time.Hour)
+	if err := s.Silence("future1", &future, "soon"); err != nil {
+		t.Fatalf("silence: %v", err)
+	}
+
+	entries, err := s.ListSilences()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 active silences, got %d", len(entries))
+	}
+
+	// Verify no expired entries
+	for _, e := range entries {
+		if e.Fingerprint == "expired1" {
+			t.Fatal("expired silence should not be in list")
+		}
+	}
+}
+
+func TestPruneExpiredSilences(t *testing.T) {
+	s := setupStore(t)
+
+	// Add permanent silence
+	if err := s.Silence("perm1", nil, "permanent"); err != nil {
+		t.Fatalf("silence: %v", err)
+	}
+
+	// Add expired silence
+	past := time.Now().UTC().Add(-1 * time.Hour)
+	if err := s.Silence("expired1", &past, "old"); err != nil {
+		t.Fatalf("silence: %v", err)
+	}
+
+	pruned, err := s.PruneExpiredSilences()
+	if err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if pruned != 1 {
+		t.Fatalf("expected 1 pruned, got %d", pruned)
+	}
+
+	// Verify only permanent remains
+	entries, err := s.ListSilences()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 remaining, got %d", len(entries))
+	}
+	if entries[0].Fingerprint != "perm1" {
+		t.Fatalf("expected perm1, got %s", entries[0].Fingerprint)
+	}
+}
+
 func TestNoResolvedDurationForNewError(t *testing.T) {
 	s := setupStore(t)
 

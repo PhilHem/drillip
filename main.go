@@ -141,11 +141,11 @@ func runServe(cfg Config) {
 
 	var notifier *notify.Notifier
 	if cfg.SMTP.Enabled() {
-		notifier = notify.NewNotifier(cfg.SMTP, cfg.Project, cfg.SMTPCooldown)
+		notifier = notify.NewNotifier(cfg.SMTP, cfg.Project, cfg.SMTPCooldown, s)
 		log.Printf("email notifications enabled (to: %s via %s, cooldown: %s)", cfg.SMTP.To, cfg.SMTP.Addr(), cfg.SMTPCooldown)
 	}
 
-	apiHandler := &api.Handler{DB: s.DB}
+	apiHandler := &api.Handler{DB: s.DB, Store: s}
 	healthHandler := ingest.HandleHealth(s.DB)
 
 	mux := http.NewServeMux()
@@ -160,6 +160,8 @@ func runServe(cfg Config) {
 	mux.HandleFunc("/api/0/stats/", apiHandler.HandleStats)
 	mux.HandleFunc("/api/0/gc/", apiHandler.HandleGC)
 	mux.HandleFunc("/api/0/resolve/", apiHandler.HandleResolve)
+	mux.HandleFunc("/api/0/silence/", apiHandler.HandleSilence)
+	mux.HandleFunc("/api/0/silences/", apiHandler.HandleListSilences)
 
 	srv := &http.Server{Addr: cfg.Addr, Handler: mux}
 
@@ -176,6 +178,11 @@ func runServe(cfg Config) {
 					log.Printf("auto-resolve error: %v", err)
 				} else if n > 0 {
 					log.Printf("auto-resolved %d error(s) (older than %s)", n, cfg.ResolveAfter)
+				}
+				if pruned, err := s.PruneExpiredSilences(); err != nil {
+					log.Printf("prune silences error: %v", err)
+				} else if pruned > 0 {
+					log.Printf("pruned %d expired silence(s)", pruned)
 				}
 			case <-stopResolve:
 				return
@@ -234,7 +241,7 @@ func main() {
 	}
 	defer s.Close()
 
-	c := &cli.CLI{DB: s.DB}
+	c := &cli.CLI{DB: s.DB, Store: s}
 	cmd := remaining[0]
 	args := remaining[1:]
 
@@ -257,11 +264,17 @@ func main() {
 		c.RunGC(args, os.Stdout)
 	case "resolve":
 		c.RunResolve(args, os.Stdout)
+	case "silence":
+		c.RunSilence(args, os.Stdout)
+	case "silences":
+		c.RunSilences(args, os.Stdout)
+	case "unsilence":
+		c.RunUnsilence(args, os.Stdout)
 	case "health":
 		runHealthCmd(cfg)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
-		fmt.Fprintln(os.Stderr, "commands: serve, top, recent, show, trend, correlate, releases, stats, gc, resolve, health")
+		fmt.Fprintln(os.Stderr, "commands: serve, top, recent, show, trend, correlate, releases, stats, gc, resolve, silence, silences, unsilence, health")
 		os.Exit(1)
 	}
 }
