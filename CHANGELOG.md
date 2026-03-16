@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.3.2 - 2026-03-16
+
+### Fixed
+
+- Compressed payloads that decompress to more than 10MB are now rejected, preventing decompression bomb attacks
+- Fingerprint parameters are validated as hex strings before database queries, preventing LIKE wildcard abuse
+- HTTP server shutdown now has a 10-second timeout instead of blocking indefinitely on stuck connections
+- Row iteration errors are now checked and propagated in all API, CLI, and store query loops (10 sites)
+- Event sanitization now covers exception type/value, stacktrace frame fields, and log entry fields
+- Notification timer stopped cleanly on shutdown to prevent duplicate digest emails
+- `hours` parameter in recent-errors API capped at 8760 (1 year)
+- Silence reason truncated to 500 characters
+
 ## v0.3.1 - 2026-03-16
 
 ### Fixed
