@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.3.0 - 2026-03-16
+
+### Added
+
+- Errors now have a lifecycle — new, ongoing, resolved, regressed — with auto-resolve after 24h of inactivity (`DRILLIP_RESOLVE_AFTER`), manual resolve via `drillip resolve <fp>` or `POST /api/0/resolve/<fp>/` ([#1](https://github.com/PhilHem/drillip/issues/1))
+- Regression detection — when a resolved error reappears, Drillip sends an amber-styled notification with "was resolved for X" context instead of treating it as a duplicate ([#2](https://github.com/PhilHem/drillip/issues/2))
+- Notification cooldown — emails are rate-limited per fingerprint and globally (`DRILLIP_SMTP_COOLDOWN`, default 60s) to prevent email storms during bad deploys ([#3](https://github.com/PhilHem/drillip/issues/3))
+- Digest batching — multiple new errors within a window (`DRILLIP_SMTP_DIGEST`, default 5m) are summarized into a single email instead of individual notifications ([#4](https://github.com/PhilHem/drillip/issues/4))
+- Silencing — mute notifications for specific errors via `drillip silence/unsilence` or `POST/DELETE /api/0/silence/<fp>/`, with optional duration and reason ([#5](https://github.com/PhilHem/drillip/issues/5))
+- State column in `drillip top` and `drillip recent` output shows whether each error is new, ongoing, or resolved
+- `drillip silences` lists active silences with expiry and reason
+
+### Changed
+
+- Codebase reorganized into domain/, store/, ingest/, api/, notify/, cli/, integrations/ packages for navigability — global DB variable replaced with Store struct
+
 ## v0.2.2 - 2026-03-16
 
 ### Added
