@@ -10,13 +10,15 @@ import (
 	"time"
 
 	"github.com/PhilHem/drillip/domain"
+	"github.com/PhilHem/drillip/integrations"
 	"github.com/PhilHem/drillip/store"
 )
 
 // Handler serves the JSON API endpoints.
 type Handler struct {
-	DB    *sql.DB
-	Store *store.Store
+	DB           *sql.DB
+	Store        *store.Store
+	Integrations integrations.Config
 }
 
 type apiError struct {
@@ -499,6 +501,170 @@ func (h *Handler) HandleListSilences(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, results)
+}
+
+// --- Correlate ---
+
+type apiCorrelation struct {
+	Fingerprint string                 `json:"fingerprint"`
+	Type        string                 `json:"type"`
+	Value       string                 `json:"value"`
+	Occurrence  *apiOccurrence         `json:"occurrence,omitempty"`
+	Stacktrace  json.RawMessage        `json:"stacktrace,omitempty"`
+	Breadcrumbs json.RawMessage        `json:"breadcrumbs,omitempty"`
+	User        json.RawMessage        `json:"user,omitempty"`
+	Logs        []apiLogEntry          `json:"logs,omitempty"`
+	Trace       *apiTraceData          `json:"trace,omitempty"`
+	Metrics     map[string]string      `json:"metrics,omitempty"`
+	Profile     []apiProfileEntry      `json:"profile,omitempty"`
+}
+
+type apiOccurrence struct {
+	Nth       int    `json:"nth"`
+	Timestamp string `json:"timestamp"`
+	TraceID   string `json:"trace_id,omitempty"`
+}
+
+type apiLogEntry struct {
+	Timestamp string `json:"timestamp"`
+	Message   string `json:"message"`
+	Priority  string `json:"priority,omitempty"`
+}
+
+type apiTraceData struct {
+	ServiceName string         `json:"service_name"`
+	Spans       []apiTraceSpan `json:"spans"`
+}
+
+type apiTraceSpan struct {
+	OperationName string `json:"operation_name"`
+	Duration      string `json:"duration"`
+}
+
+type apiProfileEntry struct {
+	Function string `json:"function"`
+}
+
+func (h *Handler) HandleCorrelate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	fp, ok := extractFingerprint(r.URL.Path, "/api/0/correlate/")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid fingerprint")
+		return
+	}
+
+	nth := 1
+	if n := r.URL.Query().Get("nth"); n != "" {
+		if v, err := strconv.Atoi(n); err == nil && v > 0 {
+			nth = v
+		}
+	}
+
+	fullFP, err := h.Store.FindByPrefix(fp)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+
+	// Fetch error row
+	var typ, val, stacktrace, breadcrumbsJSON, userCtx string
+	err = h.DB.QueryRow(`
+		SELECT type, value, stacktrace, breadcrumbs, user_context
+		FROM errors WHERE fingerprint = ?
+	`, fullFP).Scan(&typ, &val, &stacktrace, &breadcrumbsJSON, &userCtx)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+
+	result := apiCorrelation{
+		Fingerprint: fullFP,
+		Type:        typ,
+		Value:       val,
+	}
+
+	if stacktrace != "" {
+		result.Stacktrace = json.RawMessage(stacktrace)
+	}
+	if breadcrumbsJSON != "" {
+		result.Breadcrumbs = json.RawMessage(breadcrumbsJSON)
+	}
+	if userCtx != "" && userCtx != "null" {
+		result.User = json.RawMessage(userCtx)
+	}
+
+	// Fetch Nth most recent occurrence
+	var occTimestamp, occTraceID string
+	err = h.DB.QueryRow(`
+		SELECT timestamp, COALESCE(trace_id, '')
+		FROM occurrences WHERE fingerprint = ?
+		ORDER BY timestamp DESC LIMIT 1 OFFSET ?
+	`, fullFP, nth-1).Scan(&occTimestamp, &occTraceID)
+
+	var occTime time.Time
+	if err == nil {
+		occTime, _ = time.Parse(time.RFC3339, occTimestamp)
+		result.Occurrence = &apiOccurrence{
+			Nth:       nth,
+			Timestamp: occTimestamp,
+			TraceID:   occTraceID,
+		}
+	}
+
+	cfg := h.Integrations
+
+	// Logs — if unit configured
+	if cfg.Unit != "" && !occTime.IsZero() {
+		entries, err := integrations.QueryJournalctl(cfg.Unit, occTime)
+		if err == nil {
+			for _, e := range entries {
+				result.Logs = append(result.Logs, apiLogEntry{
+					Timestamp: e.Timestamp,
+					Message:   e.Message,
+					Priority:  e.Priority,
+				})
+			}
+		}
+	}
+
+	// Trace — if VT configured and occurrence has trace_id
+	if cfg.VTURL != "" && occTraceID != "" {
+		td, err := integrations.QueryVictoriaTraces(cfg.VTURL, occTraceID)
+		if err == nil && td != nil {
+			trace := &apiTraceData{ServiceName: td.ServiceName}
+			for _, s := range td.Spans {
+				trace.Spans = append(trace.Spans, apiTraceSpan{
+					OperationName: s.OperationName,
+					Duration:      s.Duration.String(),
+				})
+			}
+			result.Trace = trace
+		}
+	}
+
+	// Metrics — if VM configured
+	if cfg.VMURL != "" && !occTime.IsZero() {
+		snap, err := integrations.QueryVictoriaMetrics(cfg.VMURL, occTime)
+		if err == nil && snap != nil && len(snap.Values) > 0 {
+			result.Metrics = snap.Values
+		}
+	}
+
+	// Profile — if Pyroscope configured
+	if cfg.PyroscopeURL != "" && !occTime.IsZero() {
+		entries, err := integrations.QueryPyroscope(cfg.PyroscopeURL, cfg.Service, occTime)
+		if err == nil {
+			for _, e := range entries {
+				result.Profile = append(result.Profile, apiProfileEntry{Function: e.Function})
+			}
+		}
+	}
+
+	writeJSON(w, result)
 }
 
 // writeError writes a structured JSON error response.

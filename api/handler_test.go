@@ -528,3 +528,93 @@ func TestAPIShowIncludesState(t *testing.T) {
 		t.Fatalf("expected state 'new', got %q", detail.State)
 	}
 }
+
+// --- Correlate ---
+
+func TestAPICorrelate(t *testing.T) {
+	s := setupStore(t)
+
+	event := domain.Event{
+		Exception: &domain.ExceptionData{Values: []domain.ExceptionValue{{Type: "CorrelateAPIErr", Value: "correlate test",
+			Stacktrace: &domain.Stacktrace{Frames: []domain.Frame{{Filename: "c.go", Function: "f", Lineno: 1}}}}}},
+		Breadcrumbs: &domain.BreadcrumbData{
+			Values: []json.RawMessage{json.RawMessage(`{"category":"http","message":"GET /api"}`)},
+		},
+	}
+	sr, err := s.StoreEvent(&event)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	h := &Handler{DB: s.DB, Store: s}
+	req := httptest.NewRequest(http.MethodGet, "/api/0/correlate/"+sr.Fingerprint[:8]+"/", nil)
+	w := httptest.NewRecorder()
+	h.HandleCorrelate(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var result apiCorrelation
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if result.Type != "CorrelateAPIErr" {
+		t.Fatalf("expected CorrelateAPIErr, got %q", result.Type)
+	}
+	if result.Fingerprint != sr.Fingerprint {
+		t.Fatalf("expected fingerprint %q, got %q", sr.Fingerprint, result.Fingerprint)
+	}
+	if result.Stacktrace == nil {
+		t.Fatal("expected stacktrace")
+	}
+	if result.Breadcrumbs == nil {
+		t.Fatal("expected breadcrumbs")
+	}
+	if result.Occurrence == nil {
+		t.Fatal("expected occurrence")
+	}
+}
+
+func TestAPICorrelateNotFound(t *testing.T) {
+	s := setupStore(t)
+	h := &Handler{DB: s.DB, Store: s}
+	req := httptest.NewRequest(http.MethodGet, "/api/0/correlate/abcdef01/", nil)
+	w := httptest.NewRecorder()
+	h.HandleCorrelate(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestAPICorrelateWithNth(t *testing.T) {
+	s := setupStore(t)
+
+	event := domain.Event{
+		Exception: &domain.ExceptionData{Values: []domain.ExceptionValue{{Type: "NthErr", Value: "nth test",
+			Stacktrace: &domain.Stacktrace{Frames: []domain.Frame{{Filename: "n.go", Function: "f", Lineno: 1}}}}}},
+	}
+	sr, err := s.StoreEvent(&event)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	// Store a second occurrence
+	if _, err := s.StoreEvent(&event); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	h := &Handler{DB: s.DB, Store: s}
+	req := httptest.NewRequest(http.MethodGet, "/api/0/correlate/"+sr.Fingerprint[:8]+"/?nth=2", nil)
+	w := httptest.NewRecorder()
+	h.HandleCorrelate(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var result apiCorrelation
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if result.Occurrence == nil || result.Occurrence.Nth != 2 {
+		t.Fatalf("expected nth=2, got %+v", result.Occurrence)
+	}
+}

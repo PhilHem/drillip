@@ -152,7 +152,7 @@ func runServe(cfg Config) {
 		slog.Info("email notifications enabled", "to", cfg.SMTP.To, "via", cfg.SMTP.Addr(), "cooldown", cfg.SMTPCooldown, "digest", cfg.SMTPDigest)
 	}
 
-	apiHandler := &api.Handler{DB: s.DB, Store: s}
+	apiHandler := &api.Handler{DB: s.DB, Store: s, Integrations: cfg.Integrations}
 	healthHandler := ingest.HandleHealth(s.DB)
 
 	mux := http.NewServeMux()
@@ -167,6 +167,7 @@ func runServe(cfg Config) {
 	mux.HandleFunc("/api/0/stats/", apiHandler.HandleStats)
 	mux.HandleFunc("/api/0/gc/", apiHandler.HandleGC)
 	mux.HandleFunc("/api/0/resolve/", apiHandler.HandleResolve)
+	mux.HandleFunc("/api/0/correlate/", apiHandler.HandleCorrelate)
 	mux.HandleFunc("/api/0/silence/", apiHandler.HandleSilence)
 	mux.HandleFunc("/api/0/silences/", apiHandler.HandleListSilences)
 
