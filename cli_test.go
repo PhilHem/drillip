@@ -309,7 +309,7 @@ func TestParseDuration(t *testing.T) {
 
 func TestRunCorrelateNoArgs(t *testing.T) {
 	var buf bytes.Buffer
-	runCorrelate(nil, &buf, Config{})
+	runCorrelate(nil, &buf, IntegrationsConfig{})
 	if !strings.Contains(buf.String(), "usage") {
 		t.Fatalf("expected usage: %s", buf.String())
 	}
@@ -322,7 +322,7 @@ func TestRunCorrelateNoIntegrations(t *testing.T) {
 	insertTestOccurrence(t, fp, "v1.0.0", "", time.Now().UTC())
 
 	var buf bytes.Buffer
-	runCorrelate([]string{fp[:4]}, &buf, Config{})
+	runCorrelate([]string{fp[:4]}, &buf, IntegrationsConfig{})
 	out := buf.String()
 	if !strings.Contains(out, "CorrelateErr") {
 		t.Fatalf("missing error type: %s", out)
@@ -338,7 +338,7 @@ func TestRunCorrelateNoIntegrations(t *testing.T) {
 func TestRunCorrelateNotFound(t *testing.T) {
 	setupTestDB(t)
 	var buf bytes.Buffer
-	runCorrelate([]string{"nonexistent"}, &buf, Config{})
+	runCorrelate([]string{"nonexistent"}, &buf, IntegrationsConfig{})
 	if !strings.Contains(buf.String(), "not found") {
 		t.Fatalf("expected not found: %s", buf.String())
 	}

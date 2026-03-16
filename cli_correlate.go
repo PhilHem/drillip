@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func runCorrelate(args []string, w io.Writer, cfg Config) {
+func runCorrelate(args []string, w io.Writer, cfg IntegrationsConfig) {
 	if len(args) == 0 {
 		fmt.Fprintln(w, "usage: drillip correlate <fingerprint>")
 		return

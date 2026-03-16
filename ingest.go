@@ -2,6 +2,7 @@ package main
 
 import (
 	"compress/gzip"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -53,7 +54,13 @@ func readBody(r *http.Request) ([]byte, error) {
 	return io.ReadAll(reader)
 }
 
-func storeEvent(ev *Event) (string, error) {
+// storeResult holds the outcome of storing an event.
+type storeResult struct {
+	Fingerprint string
+	IsNew       bool
+}
+
+func storeEvent(ev *Event) (storeResult, error) {
 	fp := fingerprint(ev)
 	now := time.Now().UTC().Format(time.RFC3339)
 	level := ev.EffectiveLevel()
@@ -90,9 +97,19 @@ func storeEvent(ev *Event) (string, error) {
 
 	tx, err := db.Begin()
 	if err != nil {
-		return "", err
+		return storeResult{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	// Check if this fingerprint already exists
+	var isNew bool
+	var dummy int
+	err = tx.QueryRow("SELECT 1 FROM errors WHERE fingerprint = ?", fp).Scan(&dummy)
+	if err == sql.ErrNoRows {
+		isNew = true
+	} else if err != nil {
+		return storeResult{}, err
+	}
 
 	_, err = tx.Exec(`
 		INSERT INTO errors (fingerprint, type, value, level, stacktrace, breadcrumbs,
@@ -108,61 +125,67 @@ func storeEvent(ev *Event) (string, error) {
 		ev.Release, ev.Environment, userJSON, tagsJSON, ev.Platform, now, now,
 		now, breadcrumbsJSON, userJSON, ev.Release)
 	if err != nil {
-		return "", err
+		return storeResult{}, err
 	}
 
 	_, err = tx.Exec(`INSERT INTO occurrences (fingerprint, timestamp, release_tag, trace_id, tags) VALUES (?,?,?,?,?)`,
 		fp, now, ev.Release, ev.TraceID(), tagsJSON)
 	if err != nil {
-		return "", err
+		return storeResult{}, err
 	}
 
-	return fp, tx.Commit()
+	return storeResult{Fingerprint: fp, IsNew: isNew}, tx.Commit()
 }
 
-func handleIngest(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	body, err := readBody(r)
-	if err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
-		return
-	}
-	defer r.Body.Close()
-
-	// Try envelope format first, fall back to plain JSON
-	event, err := parseEnvelope(body)
-	if err != nil {
-		var ev Event
-		if jsonErr := json.Unmarshal(body, &ev); jsonErr != nil {
-			http.Error(w, "invalid payload", http.StatusBadRequest)
+func makeIngestHandler(smtpCfg SMTPConfig) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		event = &ev
-	}
 
-	// Need either an exception or a message to store
-	hasException := event.Exception != nil && len(event.Exception.Values) > 0
-	hasMessage := event.messageText() != ""
-	if !hasException && !hasMessage {
+		body, err := readBody(r)
+		if err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		defer r.Body.Close()
+
+		// Try envelope format first, fall back to plain JSON
+		event, err := parseEnvelope(body)
+		if err != nil {
+			var ev Event
+			if jsonErr := json.Unmarshal(body, &ev); jsonErr != nil {
+				http.Error(w, "invalid payload", http.StatusBadRequest)
+				return
+			}
+			event = &ev
+		}
+
+		// Need either an exception or a message to store
+		hasException := event.Exception != nil && len(event.Exception.Values) > 0
+		hasMessage := event.messageText() != ""
+		if !hasException && !hasMessage {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"ok"}`))
+			return
+		}
+
+		result, err := storeEvent(event)
+		if err != nil {
+			log.Printf("store event: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		if result.IsNew {
+			go notifyNewError(smtpCfg, event, result.Fingerprint)
+		}
+
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"ok"}`))
-		return
+		resp, _ := json.Marshal(map[string]string{"id": result.Fingerprint})
+		_, _ = w.Write(resp)
 	}
-
-	fp, err := storeEvent(event)
-	if err != nil {
-		log.Printf("store event: %v", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	resp, _ := json.Marshal(map[string]string{"id": fp})
-	_, _ = w.Write(resp)
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {

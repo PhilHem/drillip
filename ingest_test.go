@@ -65,7 +65,7 @@ func TestHandlePlainJSONEvent(t *testing.T) {
 	body, _ := json.Marshal(event)
 	req := httptest.NewRequest(http.MethodPost, "/api/1/store/", bytes.NewReader(body))
 	w := httptest.NewRecorder()
-	handleIngest(w, req)
+	makeIngestHandler(SMTPConfig{})(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
@@ -83,7 +83,7 @@ func TestHandlePlainJSONEvent(t *testing.T) {
 	// Send again — count should increment
 	req = httptest.NewRequest(http.MethodPost, "/api/1/store/", bytes.NewReader(body))
 	w = httptest.NewRecorder()
-	handleIngest(w, req)
+	makeIngestHandler(SMTPConfig{})(w, req)
 
 	if err := db.QueryRow("SELECT count FROM errors WHERE type = 'RuntimeError'").Scan(&count); err != nil {
 		t.Fatalf("query: %v", err)
@@ -121,7 +121,7 @@ func TestHandleEnvelopeEvent(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/1/envelope/", bytes.NewReader([]byte(envelope)))
 	w := httptest.NewRecorder()
-	handleIngest(w, req)
+	makeIngestHandler(SMTPConfig{})(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
@@ -163,7 +163,7 @@ func TestHandleBrotliEnvelope(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/1/envelope/", &buf)
 	req.Header.Set("Content-Encoding", "br")
 	w := httptest.NewRecorder()
-	handleIngest(w, req)
+	makeIngestHandler(SMTPConfig{})(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
@@ -204,7 +204,7 @@ func TestHandleGzipEnvelope(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/1/envelope/", &buf)
 	req.Header.Set("Content-Encoding", "gzip")
 	w := httptest.NewRecorder()
-	handleIngest(w, req)
+	makeIngestHandler(SMTPConfig{})(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
@@ -226,7 +226,7 @@ func TestHandleEmptyEvent(t *testing.T) {
 	body := []byte(`{"event_id":"no-content"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/1/store/", bytes.NewReader(body))
 	w := httptest.NewRecorder()
-	handleIngest(w, req)
+	makeIngestHandler(SMTPConfig{})(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
@@ -245,7 +245,7 @@ func TestHandleMethodNotAllowed(t *testing.T) {
 	setupTestDB(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/1/store/", nil)
 	w := httptest.NewRecorder()
-	handleIngest(w, req)
+	makeIngestHandler(SMTPConfig{})(w, req)
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("expected 405, got %d", w.Code)
@@ -420,7 +420,7 @@ func TestHandleMessageEvent(t *testing.T) {
 	body := []byte(`{"event_id":"msg-1","level":"info","logentry":{"formatted":"Deployment started for v1.2.0","message":"Deployment started for %s"}}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/1/store/", bytes.NewReader(body))
 	w := httptest.NewRecorder()
-	handleIngest(w, req)
+	makeIngestHandler(SMTPConfig{})(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
@@ -448,7 +448,7 @@ func TestHandleMessageWithPlainField(t *testing.T) {
 	body := []byte(`{"event_id":"msg-2","level":"warning","message":"disk space low"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/1/store/", bytes.NewReader(body))
 	w := httptest.NewRecorder()
-	handleIngest(w, req)
+	makeIngestHandler(SMTPConfig{})(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
@@ -521,7 +521,7 @@ func TestIngestReturnsFingerprint(t *testing.T) {
 	body := []byte(`{"event_id":"fp-test","level":"error","message":"test fingerprint return"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/1/store/", bytes.NewReader(body))
 	w := httptest.NewRecorder()
-	handleIngest(w, req)
+	makeIngestHandler(SMTPConfig{})(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
@@ -614,12 +614,12 @@ func TestAPIShow(t *testing.T) {
 		Exception: &ExceptionData{Values: []ExceptionValue{{Type: "ShowAPIErr", Value: "show api",
 			Stacktrace: &Stacktrace{Frames: []Frame{{Filename: "s.go", Function: "h", Lineno: 5}}}}}},
 	}
-	fp, err := storeEvent(&event)
+	result, err := storeEvent(&event)
 	if err != nil {
 		t.Fatalf("store: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/0/show/"+fp[:8]+"/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/0/show/"+result.Fingerprint[:8]+"/", nil)
 	w := httptest.NewRecorder()
 	handleAPIShow(w, req)
 
@@ -709,12 +709,12 @@ func TestAPITrend(t *testing.T) {
 		Exception: &ExceptionData{Values: []ExceptionValue{{Type: "TrendAPIErr", Value: "trend api",
 			Stacktrace: &Stacktrace{Frames: []Frame{{Filename: "t.go", Function: "f", Lineno: 1}}}}}},
 	}
-	fp, err := storeEvent(&event)
+	sr, err := storeEvent(&event)
 	if err != nil {
 		t.Fatalf("store: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/0/trend/"+fp[:8]+"/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/0/trend/"+sr.Fingerprint[:8]+"/", nil)
 	w := httptest.NewRecorder()
 	handleAPITrend(w, req)
 
@@ -741,12 +741,12 @@ func TestAPIReleases(t *testing.T) {
 		Exception: &ExceptionData{Values: []ExceptionValue{{Type: "RelAPIErr", Value: "rel api",
 			Stacktrace: &Stacktrace{Frames: []Frame{{Filename: "r.go", Function: "f", Lineno: 1}}}}}},
 	}
-	fp, err := storeEvent(&event)
+	sr, err := storeEvent(&event)
 	if err != nil {
 		t.Fatalf("store: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/0/releases/"+fp[:8]+"/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/0/releases/"+sr.Fingerprint[:8]+"/", nil)
 	w := httptest.NewRecorder()
 	handleAPIReleases(w, req)
 

@@ -15,6 +15,13 @@ import (
 type Config struct {
 	DB           string
 	Addr         string
+	SMTP         SMTPConfig
+	Integrations IntegrationsConfig
+}
+
+// IntegrationsConfig holds settings for the correlate command's
+// external data sources (logs, traces, metrics, profiles).
+type IntegrationsConfig struct {
 	Unit         string // journalctl unit name
 	VMURL        string // VictoriaMetrics base URL
 	VTURL        string // VictoriaTraces base URL
@@ -34,19 +41,37 @@ func loadConfig() Config {
 		cfg.Addr = v
 	}
 	if v := os.Getenv("DRILLIP_UNIT"); v != "" {
-		cfg.Unit = v
+		cfg.Integrations.Unit = v
 	}
 	if v := os.Getenv("DRILLIP_VM_URL"); v != "" {
-		cfg.VMURL = v
+		cfg.Integrations.VMURL = v
 	}
 	if v := os.Getenv("DRILLIP_VT_URL"); v != "" {
-		cfg.VTURL = v
+		cfg.Integrations.VTURL = v
 	}
 	if v := os.Getenv("DRILLIP_PYROSCOPE_URL"); v != "" {
-		cfg.PyroscopeURL = v
+		cfg.Integrations.PyroscopeURL = v
 	}
 	if v := os.Getenv("DRILLIP_SERVICE"); v != "" {
-		cfg.Service = v
+		cfg.Integrations.Service = v
+	}
+	if v := os.Getenv("DRILLIP_SMTP_HOST"); v != "" {
+		cfg.SMTP.Host = v
+	}
+	if v := os.Getenv("DRILLIP_SMTP_PORT"); v != "" {
+		cfg.SMTP.Port = v
+	}
+	if v := os.Getenv("DRILLIP_SMTP_FROM"); v != "" {
+		cfg.SMTP.From = v
+	}
+	if v := os.Getenv("DRILLIP_SMTP_TO"); v != "" {
+		cfg.SMTP.To = v
+	}
+	if v := os.Getenv("DRILLIP_SMTP_USER"); v != "" {
+		cfg.SMTP.User = v
+	}
+	if v := os.Getenv("DRILLIP_SMTP_PASS"); v != "" {
+		cfg.SMTP.Pass = v
 	}
 	return cfg
 }
@@ -70,9 +95,13 @@ func runServe(cfg Config) {
 		log.Fatalf("init db: %v", err)
 	}
 
+	if cfg.SMTP.enabled() {
+		log.Printf("email notifications enabled (to: %s via %s)", cfg.SMTP.To, cfg.SMTP.addr())
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handleHealth)
-	mux.HandleFunc("/api/", handleIngest)
+	mux.HandleFunc("/api/", makeIngestHandler(cfg.SMTP))
 	mux.HandleFunc("/-/healthy", handleHealth)
 	mux.HandleFunc("/api/0/top/", handleAPITop)
 	mux.HandleFunc("/api/0/recent/", handleAPIRecent)
@@ -146,7 +175,7 @@ func main() {
 	case "trend":
 		runTrend(args, os.Stdout)
 	case "correlate":
-		runCorrelate(args, os.Stdout, cfg)
+		runCorrelate(args, os.Stdout, cfg.Integrations)
 	case "releases":
 		runReleases(args, os.Stdout)
 	case "stats":
