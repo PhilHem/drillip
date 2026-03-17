@@ -208,6 +208,7 @@ func (n *Notifier) send(subject, textBody, htmlBody string) {
 		}
 		err = sendFn(n.SMTP.Addr(), auth, n.SMTP.From, []string{n.SMTP.To}, msg)
 		if err == nil {
+			slog.Info("notify: email sent", "to", n.SMTP.To, "subject", subject)
 			return
 		}
 		slog.Error("notify: send attempt failed", "attempt", attempt+1, "err", err)
@@ -312,7 +313,11 @@ func (n *Notifier) SendTestEmail() error {
 			sendFn = smtp.SendMail
 		}
 	}
-	return sendFn(n.SMTP.Addr(), smtpAuth, n.SMTP.From, []string{n.SMTP.To}, msg)
+	if err := sendFn(n.SMTP.Addr(), smtpAuth, n.SMTP.From, []string{n.SMTP.To}, msg); err != nil {
+		return err
+	}
+	slog.Info("notify: test email sent", "to", n.SMTP.To)
+	return nil
 }
 
 // flush sends all pending notifications as a digest (or individual if only one).
