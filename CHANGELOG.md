@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.5 - 2026-03-17
+
+### Added
+
+- Email notification when errors are resolved — green-themed summary with resolved error list, sent on both auto-resolve and manual resolve via API
+
 ## v0.3.4 - 2026-03-17
 
 ### Added
