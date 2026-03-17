@@ -274,11 +274,11 @@ func (n *Notifier) SendTestEmail() error {
 	textBody := fmt.Sprintf("This is a test email from drillip.\n\nProject: %s\nSMTP: %s\nTime: %s\n",
 		n.Project, n.SMTP.Addr(), time.Now().UTC().Format(time.RFC3339))
 
-	htmlBody := fmt.Sprintf(`<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+	htmlBody := fmt.Sprintf(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="color-scheme" content="light only"><meta name="supported-color-schemes" content="light only"></head>
 <body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background-color:#f5f5f5;">
 <table role="presentation" width="100%%" cellspacing="0" cellpadding="0" style="background-color:#f5f5f5;padding:20px 0;"><tr><td align="center">
 <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="background-color:#ffffff;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
-<tr><td style="background:linear-gradient(135deg,#059669 0%%,#047857 100%%);padding:24px 40px;border-radius:8px 8px 0 0;">
+<tr><td style="background-color:#059669;padding:24px 40px;border-radius:8px 8px 0 0;">
 <p style="margin:0;color:#ffffff;font-size:20px;font-weight:600;">SMTP Test Successful</p>
 </td></tr>
 <tr><td style="padding:32px 40px;">
@@ -378,7 +378,7 @@ func formatResolvedHTMLEmail(resolved []store.ResolvedError, project string) str
 	var b strings.Builder
 
 	// Document start + outer table
-	b.WriteString(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>`)
+	b.WriteString(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="color-scheme" content="light only"><meta name="supported-color-schemes" content="light only"></head>`)
 	b.WriteString(`<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background-color:#f5f5f5;">`)
 	b.WriteString(`<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#f5f5f5;padding:20px 0;"><tr><td align="center">`)
 	b.WriteString(`<table role="presentation" width="600" cellspacing="0" cellpadding="0" style="background-color:#ffffff;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">`)
@@ -392,10 +392,10 @@ func formatResolvedHTMLEmail(resolved []store.ResolvedError, project string) str
 	}
 	b.WriteString(`</td></tr></table></td></tr>`)
 
-	// Header — green gradient
-	b.WriteString(`<tr><td style="background:linear-gradient(135deg,#059669 0%,#047857 100%);padding:24px 40px;">`)
+	// Header — green
+	b.WriteString(`<tr><td style="background-color:#059669;padding:24px 40px;">`)
 	b.WriteString(`<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>`)
-	b.WriteString(fmt.Sprintf(`<td><p style="margin:0;color:rgba(255,255,255,0.8);font-size:13px;text-transform:uppercase;letter-spacing:0.5px;">Resolved</p><p style="margin:8px 0 0 0;color:#ffffff;font-size:20px;font-weight:600;">%d errors resolved</p></td>`, len(resolved)))
+	b.WriteString(fmt.Sprintf(`<td><p style="margin:0;color:#d1fae5;font-size:13px;text-transform:uppercase;letter-spacing:0.5px;">Resolved</p><p style="margin:8px 0 0 0;color:#ffffff;font-size:20px;font-weight:600;">%d errors resolved</p></td>`, len(resolved)))
 	b.WriteString(`</tr></table></td></tr>`)
 
 	// Error table
@@ -468,7 +468,7 @@ func formatDigestHTMLEmail(items []pendingNotification, project string) string {
 	var b strings.Builder
 
 	// Document start + outer table
-	b.WriteString(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>`)
+	b.WriteString(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="color-scheme" content="light only"><meta name="supported-color-schemes" content="light only"></head>`)
 	b.WriteString(`<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background-color:#f5f5f5;">`)
 	b.WriteString(`<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#f5f5f5;padding:20px 0;"><tr><td align="center">`)
 	b.WriteString(`<table role="presentation" width="600" cellspacing="0" cellpadding="0" style="background-color:#ffffff;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">`)
@@ -482,10 +482,10 @@ func formatDigestHTMLEmail(items []pendingNotification, project string) string {
 	}
 	b.WriteString(`</td></tr></table></td></tr>`)
 
-	// Header — green gradient for digest
-	b.WriteString(`<tr><td style="background:linear-gradient(135deg,#059669 0%,#047857 100%);padding:24px 40px;">`)
+	// Header — green for digest
+	b.WriteString(`<tr><td style="background-color:#059669;padding:24px 40px;">`)
 	b.WriteString(`<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>`)
-	b.WriteString(fmt.Sprintf(`<td><p style="margin:0;color:rgba(255,255,255,0.8);font-size:13px;text-transform:uppercase;letter-spacing:0.5px;">Digest</p><p style="margin:8px 0 0 0;color:#ffffff;font-size:20px;font-weight:600;">%d new errors</p></td>`, len(items)))
+	b.WriteString(fmt.Sprintf(`<td><p style="margin:0;color:#d1fae5;font-size:13px;text-transform:uppercase;letter-spacing:0.5px;">Digest</p><p style="margin:8px 0 0 0;color:#ffffff;font-size:20px;font-weight:600;">%d new errors</p></td>`, len(items)))
 	b.WriteString(`</tr></table></td></tr>`)
 
 	// Error table
@@ -610,21 +610,25 @@ func formatHTMLEmail(ev *domain.Event, fp, project string, isRegression bool, re
 	}
 
 	// Choose colors based on regression vs new
-	headerGradient := `linear-gradient(135deg,#e74c3c 0%%,#c0392b 100%%)`
+	headerBg := "#e74c3c"
 	headerLabel := "New Issue"
+	headerLabelColor := "#fecaca"
 	exceptionBg := "#fef2f2"
 	exceptionBorder := "#e74c3c"
+	levelBadgeBg := "rgba(255,255,255,0.2)"
 	if isRegression {
-		headerGradient = `linear-gradient(135deg,#f59e0b 0%%,#d97706 100%%)`
+		headerBg = "#d97706"
 		headerLabel = "Regression"
+		headerLabelColor = "#fef3c7"
 		exceptionBg = "#fffbeb"
 		exceptionBorder = "#f59e0b"
+		levelBadgeBg = "rgba(255,255,255,0.2)"
 	}
 
 	var b strings.Builder
 
 	// Document start + outer table
-	b.WriteString(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>`)
+	b.WriteString(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="color-scheme" content="light only"><meta name="supported-color-schemes" content="light only"></head>`)
 	b.WriteString(`<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background-color:#f5f5f5;">`)
 	b.WriteString(`<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#f5f5f5;padding:20px 0;"><tr><td align="center">`)
 	b.WriteString(`<table role="presentation" width="600" cellspacing="0" cellpadding="0" style="background-color:#ffffff;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">`)
@@ -643,10 +647,10 @@ func formatHTMLEmail(ev *domain.Event, fp, project string, isRegression bool, re
 	b.WriteString(`</tr></table></td></tr>`)
 
 	// Header
-	b.WriteString(fmt.Sprintf(`<tr><td style="background:%s;padding:24px 40px;">`, headerGradient))
+	b.WriteString(fmt.Sprintf(`<tr><td style="background-color:%s;padding:24px 40px;">`, headerBg))
 	b.WriteString(`<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>`)
-	b.WriteString(fmt.Sprintf(`<td><p style="margin:0;color:rgba(255,255,255,0.8);font-size:13px;text-transform:uppercase;letter-spacing:0.5px;">%s</p><p style="margin:8px 0 0 0;color:#ffffff;font-size:20px;font-weight:600;">%s</p></td>`, headerLabel, html.EscapeString(evType)))
-	b.WriteString(fmt.Sprintf(`<td align="right" style="vertical-align:top;"><span style="display:inline-block;padding:4px 12px;border-radius:12px;background-color:rgba(255,255,255,0.2);color:#fff;font-size:12px;font-weight:500;">%s</span></td>`, html.EscapeString(level)))
+	b.WriteString(fmt.Sprintf(`<td><p style="margin:0;color:%s;font-size:13px;text-transform:uppercase;letter-spacing:0.5px;">%s</p><p style="margin:8px 0 0 0;color:#ffffff;font-size:20px;font-weight:600;">%s</p></td>`, headerLabelColor, headerLabel, html.EscapeString(evType)))
+	b.WriteString(fmt.Sprintf(`<td align="right" style="vertical-align:top;"><span style="display:inline-block;padding:4px 12px;border-radius:12px;background-color:%s;color:#fff;font-size:12px;font-weight:500;">%s</span></td>`, levelBadgeBg, html.EscapeString(level)))
 	b.WriteString(`</tr></table></td></tr>`)
 
 	// Content start
