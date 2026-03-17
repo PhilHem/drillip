@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.7 - 2026-03-17
+
+### Fixed
+
+- Email notifications now render correctly in dark mode email clients — header text was invisible due to CSS gradients and rgba colors being stripped
+
 ## v0.3.6 - 2026-03-17
 
 ### Added
