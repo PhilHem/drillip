@@ -81,8 +81,8 @@ func TestFormatResolvedHTMLEmail(t *testing.T) {
 	for _, want := range []string{
 		"Resolved",
 		"2 errors resolved",
-		"#059669",           // green gradient
-		"#047857",           // green gradient end
+		"#059669",           // green header background
+		"#d1fae5",           // header label color
 		"#f0fdf4",           // green row background
 		"ValueError",
 		"bad input",
@@ -915,8 +915,8 @@ func TestDigestHTMLContainsAllErrors(t *testing.T) {
 	for _, want := range []string{
 		"Digest",
 		"3 new errors",
-		"#059669",          // green gradient
-		"#047857",          // green gradient end
+		"#059669",          // green header background
+		"#d1fae5",          // header label color
 		"ValueError",
 		"invalid input",
 		"04827c09",
