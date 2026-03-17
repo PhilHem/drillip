@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.6 - 2026-03-17
+
+### Added
+
+- Successful email sends are now logged (`notify: email sent` / `notify: test email sent`) for audit trail — previously only failures were logged
+
 ## v0.3.5 - 2026-03-17
 
 ### Added
