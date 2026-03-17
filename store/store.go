@@ -239,17 +239,63 @@ func (s *Store) StoreEvent(ev *domain.Event) (StoreResult, error) {
 	return StoreResult{Fingerprint: fp, IsNew: isNew, IsRegression: isRegression, ResolvedDuration: resolvedDuration}, tx.Commit()
 }
 
+// ResolvedError holds metadata about a single error that was resolved.
+type ResolvedError struct {
+	Fingerprint string
+	Type        string
+	Value       string
+	ResolvedAt  string
+}
+
 // AutoResolve marks errors as resolved if they haven't been seen within olderThan.
-func (s *Store) AutoResolve(olderThan time.Duration) (int64, error) {
+// Returns the list of errors that were resolved and any error encountered.
+func (s *Store) AutoResolve(olderThan time.Duration) ([]ResolvedError, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
-	res, err := s.DB.Exec(
-		`UPDATE errors SET resolved_at = last_seen WHERE resolved_at IS NULL AND last_seen < ?`,
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Collect details of errors about to be resolved
+	rows, err := tx.Query(
+		`SELECT fingerprint, type, value FROM errors WHERE resolved_at IS NULL AND last_seen < ?`,
 		cutoff,
 	)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return res.RowsAffected()
+	var resolved []ResolvedError
+	for rows.Next() {
+		var r ResolvedError
+		if err := rows.Scan(&r.Fingerprint, &r.Type, &r.Value); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		r.ResolvedAt = now
+		resolved = append(resolved, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if len(resolved) == 0 {
+		return nil, tx.Commit()
+	}
+
+	// Mark them as resolved
+	_, err = tx.Exec(
+		`UPDATE errors SET resolved_at = ? WHERE resolved_at IS NULL AND last_seen < ?`,
+		now, cutoff,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return resolved, tx.Commit()
 }
 
 // GCOccurrences deletes occurrence rows older than the given threshold.
@@ -342,6 +388,7 @@ type ResolveResult struct {
 	Matched     int64
 	Fingerprint string // full fingerprint of the first matched error
 	ResolvedAt  string
+	Resolved    []ResolvedError // details of resolved errors
 }
 
 // Resolve manually marks an error as resolved by fingerprint prefix.
@@ -354,6 +401,36 @@ func (s *Store) Resolve(fpPrefix string) (ResolveResult, error) {
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// Collect details before resolving
+	rows, err := tx.Query(
+		`SELECT fingerprint, type, value FROM errors WHERE fingerprint LIKE ?||'%' AND resolved_at IS NULL`,
+		fpPrefix,
+	)
+	if err != nil {
+		return ResolveResult{}, err
+	}
+	var resolved []ResolvedError
+	for rows.Next() {
+		var r ResolvedError
+		if err := rows.Scan(&r.Fingerprint, &r.Type, &r.Value); err != nil {
+			rows.Close()
+			return ResolveResult{}, err
+		}
+		r.ResolvedAt = now
+		resolved = append(resolved, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return ResolveResult{}, err
+	}
+
+	if len(resolved) == 0 {
+		if err := tx.Commit(); err != nil {
+			return ResolveResult{}, err
+		}
+		return ResolveResult{Matched: 0, ResolvedAt: now}, nil
+	}
+
 	res, err := tx.Exec(
 		`UPDATE errors SET resolved_at = ? WHERE fingerprint LIKE ?||'%' AND resolved_at IS NULL`,
 		now, fpPrefix,
@@ -363,16 +440,11 @@ func (s *Store) Resolve(fpPrefix string) (ResolveResult, error) {
 	}
 	n, _ := res.RowsAffected()
 
-	var fullFP string
-	if n > 0 {
-		_ = tx.QueryRow("SELECT fingerprint FROM errors WHERE fingerprint LIKE ?||'%' LIMIT 1", fpPrefix).Scan(&fullFP)
-	}
-
 	if err := tx.Commit(); err != nil {
 		return ResolveResult{}, err
 	}
 
-	return ResolveResult{Matched: n, Fingerprint: fullFP, ResolvedAt: now}, nil
+	return ResolveResult{Matched: n, Fingerprint: resolved[0].Fingerprint, ResolvedAt: now, Resolved: resolved}, nil
 }
 
 // TagValue holds a single tag value and its occurrence count/percentage.

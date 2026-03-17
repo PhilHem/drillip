@@ -14,6 +14,135 @@ import (
 	"github.com/PhilHem/drillip/store"
 )
 
+// --- Resolved notification tests ---
+
+func TestNotifyResolvedSendsEmail(t *testing.T) {
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, nil)
+	var captured []byte
+	n.sendMail = func(_ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
+		captured = msg
+		return nil
+	}
+
+	resolved := []store.ResolvedError{
+		{Fingerprint: "abcdef1234567890", Type: "ValueError", Value: "bad input", ResolvedAt: "2026-03-17T10:00:00Z"},
+		{Fingerprint: "1234567890abcdef", Type: "IOError", Value: "connection refused", ResolvedAt: "2026-03-17T10:00:00Z"},
+	}
+
+	n.NotifyResolved(resolved)
+
+	msg := string(captured)
+	if !strings.Contains(msg, "Subject: [drillip] resolved: 2 errors in proj") {
+		t.Errorf("expected resolved subject, got message:\n%s", msg[:min(len(msg), 400)])
+	}
+}
+
+func TestNotifyResolvedEmptyListNoSend(t *testing.T) {
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, nil)
+	calls := 0
+	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
+		calls++
+		return nil
+	}
+
+	n.NotifyResolved(nil)
+	n.NotifyResolved([]store.ResolvedError{})
+
+	if calls != 0 {
+		t.Fatalf("expected 0 sends for empty resolved list, got %d", calls)
+	}
+}
+
+func TestNotifyResolvedDisabledSMTP(t *testing.T) {
+	n := NewNotifier(SMTPConfig{}, "proj", 0, 0, nil)
+	calls := 0
+	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
+		calls++
+		return nil
+	}
+
+	n.NotifyResolved([]store.ResolvedError{
+		{Fingerprint: "abcdef1234567890", Type: "ValueError", Value: "bad"},
+	})
+
+	if calls != 0 {
+		t.Fatalf("expected 0 sends with disabled SMTP, got %d", calls)
+	}
+}
+
+func TestFormatResolvedHTMLEmail(t *testing.T) {
+	resolved := []store.ResolvedError{
+		{Fingerprint: "abcdef1234567890", Type: "ValueError", Value: "bad input", ResolvedAt: "2026-03-17T10:00:00Z"},
+		{Fingerprint: "1234567890abcdef", Type: "IOError", Value: "connection refused", ResolvedAt: "2026-03-17T10:00:00Z"},
+	}
+
+	body := formatResolvedHTMLEmail(resolved, "myproject")
+
+	for _, want := range []string{
+		"Resolved",
+		"2 errors resolved",
+		"#059669",           // green gradient
+		"#047857",           // green gradient end
+		"#f0fdf4",           // green row background
+		"ValueError",
+		"bad input",
+		"abcdef12",
+		"IOError",
+		"connection refused",
+		"12345678",
+		"drillip top",
+		"drillip recent",
+		"myproject",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("resolved HTML missing %q", want)
+		}
+	}
+}
+
+func TestFormatResolvedPlainEmail(t *testing.T) {
+	resolved := []store.ResolvedError{
+		{Fingerprint: "abcdef1234567890", Type: "ValueError", Value: "bad input", ResolvedAt: "2026-03-17T10:00:00Z"},
+		{Fingerprint: "1234567890abcdef", Type: "IOError", Value: "connection refused", ResolvedAt: "2026-03-17T10:00:00Z"},
+	}
+
+	text := formatResolvedPlainEmail(resolved, "myproject")
+
+	for _, want := range []string{
+		"RESOLVED: 2 errors in myproject",
+		"1. ValueError: bad input (fp: abcdef12)",
+		"2. IOError: connection refused (fp: 12345678)",
+		"drillip top",
+		"drillip recent",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("resolved plain text missing %q\ngot:\n%s", want, text)
+		}
+	}
+}
+
+func TestNotifyResolvedHTMLContainsErrorDetails(t *testing.T) {
+	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, nil)
+	var captured []byte
+	n.sendMail = func(_ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
+		captured = msg
+		return nil
+	}
+
+	resolved := []store.ResolvedError{
+		{Fingerprint: "abcdef1234567890", Type: "RuntimeError", Value: "crash", ResolvedAt: "2026-03-17T10:00:00Z"},
+	}
+
+	n.NotifyResolved(resolved)
+
+	msg := string(captured)
+	for _, want := range []string{"RuntimeError", "crash", "abcdef12"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("resolved email missing %q", want)
+		}
+	}
+}
+
 func TestSMTPConfigDisabledByDefault(t *testing.T) {
 	cfg := SMTPConfig{}
 	if cfg.Enabled() {

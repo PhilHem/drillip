@@ -186,11 +186,14 @@ func runServe(cfg Config) {
 		for {
 			select {
 			case <-ticker.C:
-				n, err := s.AutoResolve(cfg.ResolveAfter)
+				resolved, err := s.AutoResolve(cfg.ResolveAfter)
 				if err != nil {
 					slog.Error("auto-resolve error", "err", err)
-				} else if n > 0 {
-					slog.Info("auto-resolved errors", "count", n, "older_than", cfg.ResolveAfter)
+				} else if len(resolved) > 0 {
+					slog.Info("auto-resolved errors", "count", len(resolved), "older_than", cfg.ResolveAfter)
+					if notifier != nil {
+						go notifier.NotifyResolved(resolved)
+					}
 				}
 				if pruned, err := s.PruneExpiredSilences(); err != nil {
 					slog.Error("prune silences error", "err", err)

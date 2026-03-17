@@ -155,12 +155,12 @@ func TestAutoResolve(t *testing.T) {
 	}
 
 	// Auto-resolve with 24h threshold
-	n, err := s.AutoResolve(24 * time.Hour)
+	resolved, err := s.AutoResolve(24 * time.Hour)
 	if err != nil {
 		t.Fatalf("auto-resolve: %v", err)
 	}
-	if n != 1 {
-		t.Fatalf("expected 1 resolved, got %d", n)
+	if len(resolved) != 1 {
+		t.Fatalf("expected 1 resolved, got %d", len(resolved))
 	}
 
 	// Verify resolved_at is set

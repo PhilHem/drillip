@@ -421,6 +421,10 @@ func (h *Handler) HandleResolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.Notifier != nil && len(result.Resolved) > 0 {
+		go h.Notifier.NotifyResolved(result.Resolved)
+	}
+
 	writeJSON(w, map[string]interface{}{
 		"fingerprint": result.Fingerprint,
 		"resolved_at": result.ResolvedAt,

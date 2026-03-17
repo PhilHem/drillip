@@ -354,6 +354,109 @@ func (n *Notifier) Close() {
 	n.flush()
 }
 
+// NotifyResolved sends an email summarizing errors that were resolved.
+// Safe to call from a goroutine.
+func (n *Notifier) NotifyResolved(resolved []store.ResolvedError) {
+	if !n.SMTP.Enabled() || len(resolved) == 0 {
+		return
+	}
+
+	subject := sanitizeHeader(fmt.Sprintf("[drillip] resolved: %d errors in %s", len(resolved), n.Project))
+	htmlBody := formatResolvedHTMLEmail(resolved, n.Project)
+	textBody := formatResolvedPlainEmail(resolved, n.Project)
+	n.send(subject, textBody, htmlBody)
+}
+
+// --- Resolved email formats ---
+
+func formatResolvedHTMLEmail(resolved []store.ResolvedError, project string) string {
+	var b strings.Builder
+
+	// Document start + outer table
+	b.WriteString(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>`)
+	b.WriteString(`<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background-color:#f5f5f5;">`)
+	b.WriteString(`<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#f5f5f5;padding:20px 0;"><tr><td align="center">`)
+	b.WriteString(`<table role="presentation" width="600" cellspacing="0" cellpadding="0" style="background-color:#ffffff;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.1);">`)
+
+	// Project bar
+	b.WriteString(`<tr><td style="background-color:#f1f5f9;padding:12px 40px;border-radius:8px 8px 0 0;border-bottom:1px solid #e2e8f0;">`)
+	b.WriteString(`<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>`)
+	b.WriteString(`<td><span style="color:#1e293b;font-size:13px;font-weight:600;">drillip</span>`)
+	if project != "" {
+		b.WriteString(fmt.Sprintf(`<span style="color:#94a3b8;font-size:13px;">&nbsp;&middot;&nbsp;%s</span>`, html.EscapeString(project)))
+	}
+	b.WriteString(`</td></tr></table></td></tr>`)
+
+	// Header — green gradient
+	b.WriteString(`<tr><td style="background:linear-gradient(135deg,#059669 0%,#047857 100%);padding:24px 40px;">`)
+	b.WriteString(`<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>`)
+	b.WriteString(fmt.Sprintf(`<td><p style="margin:0;color:rgba(255,255,255,0.8);font-size:13px;text-transform:uppercase;letter-spacing:0.5px;">Resolved</p><p style="margin:8px 0 0 0;color:#ffffff;font-size:20px;font-weight:600;">%d errors resolved</p></td>`, len(resolved)))
+	b.WriteString(`</tr></table></td></tr>`)
+
+	// Error table
+	b.WriteString(`<tr><td style="padding:32px 40px;">`)
+	b.WriteString(`<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;">`)
+
+	// Table header
+	b.WriteString(`<tr style="background-color:#f8fafc;">`)
+	b.WriteString(`<td style="padding:8px 12px;color:#64748b;font-size:12px;font-weight:600;">Type</td>`)
+	b.WriteString(`<td style="padding:8px 12px;color:#64748b;font-size:12px;font-weight:600;">Value</td>`)
+	b.WriteString(`<td style="padding:8px 12px;color:#64748b;font-size:12px;font-weight:600;">Fingerprint</td>`)
+	b.WriteString(`</tr>`)
+
+	// One row per resolved error
+	for _, r := range resolved {
+		fpShort := r.Fingerprint
+		if len(fpShort) > 8 {
+			fpShort = fpShort[:8]
+		}
+		evValue := r.Value
+		if len(evValue) > 50 {
+			evValue = evValue[:47] + "..."
+		}
+
+		b.WriteString(`<tr style="background-color:#f0fdf4;">`)
+		b.WriteString(fmt.Sprintf(`<td style="padding:10px 12px;border-top:1px solid #e2e8f0;color:#1e293b;font-size:13px;font-weight:600;font-family:'SF Mono',Monaco,'Courier New',monospace;">%s</td>`, html.EscapeString(r.Type)))
+		b.WriteString(fmt.Sprintf(`<td style="padding:10px 12px;border-top:1px solid #e2e8f0;color:#475569;font-size:13px;">%s</td>`, html.EscapeString(evValue)))
+		b.WriteString(fmt.Sprintf(`<td style="padding:10px 12px;border-top:1px solid #e2e8f0;font-family:'SF Mono',Monaco,'Courier New',monospace;font-size:12px;color:#64748b;">%s</td>`, html.EscapeString(fpShort)))
+		b.WriteString(`</tr>`)
+	}
+
+	b.WriteString(`</table></td></tr>`)
+
+	// CLI hint
+	b.WriteString(`<tr><td style="padding:0 40px 32px 40px;">`)
+	b.WriteString(`<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;">`)
+	b.WriteString(`<tr><td style="padding:16px 20px;"><p style="margin:0 0 8px 0;color:#0369a1;font-size:13px;font-weight:600;">View status</p><p style="margin:0 0 4px 0;color:#1e293b;font-size:13px;font-family:'SF Mono',Monaco,'Courier New',monospace;">drillip top</p><p style="margin:0;color:#1e293b;font-size:13px;font-family:'SF Mono',Monaco,'Courier New',monospace;">drillip recent</p></td></tr>`)
+	b.WriteString(`</table></td></tr>`)
+
+	// Footer
+	b.WriteString(`<tr><td style="padding:20px 40px;background-color:#f8fafc;border-top:1px solid #e2e8f0;border-radius:0 0 8px 8px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td style="color:#94a3b8;font-size:12px;">drillip error tracking</td></tr></table></td></tr>`)
+
+	// Close tables
+	b.WriteString(`</table></td></tr></table></body></html>`)
+
+	return b.String()
+}
+
+func formatResolvedPlainEmail(resolved []store.ResolvedError, project string) string {
+	var b strings.Builder
+
+	b.WriteString(fmt.Sprintf("RESOLVED: %d errors in %s\n\n", len(resolved), project))
+
+	for i, r := range resolved {
+		fpShort := r.Fingerprint
+		if len(fpShort) > 8 {
+			fpShort = fpShort[:8]
+		}
+		b.WriteString(fmt.Sprintf("%d. %s: %s (fp: %s)\n", i+1, r.Type, r.Value, fpShort))
+	}
+
+	b.WriteString("\n---\nView status:\n  drillip top\n  drillip recent\n")
+
+	return b.String()
+}
+
 // --- Digest email formats ---
 
 func formatDigestHTMLEmail(items []pendingNotification, project string) string {
