@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	github.com/andybalholm/brotli v1.2.0
-	modernc.org/sqlite v1.46.2
+	modernc.org/sqlite v1.48.0
 )
 
 require (
