@@ -320,19 +320,13 @@ func (c *CLI) RunCorrelate(args []string, w io.Writer, cfg integrations.Config) 
 		printStacktrace(w, cd.Stacktrace)
 	}
 
-	// Logs — if unit configured
-	if cfg.Unit != "" && !occTime.IsZero() {
+	cr := integrations.Correlate(cfg, occTime, occTraceID)
+
+	if len(cr.Logs) > 0 {
 		fmt.Fprintln(w)
 		printSection(w, "Logs")
-		entries, err := integrations.QueryJournalctl(cfg.Unit, occTime)
-		if err != nil {
-			fmt.Fprintf(w, "  (unavailable: %v)\n", err)
-		} else if len(entries) == 0 {
-			fmt.Fprintln(w, "  (no log entries in window)")
-		} else {
-			for _, e := range entries {
-				fmt.Fprintf(w, "  %s  %s\n", e.Timestamp, e.Message)
-			}
+		for _, e := range cr.Logs {
+			fmt.Fprintf(w, "  %s  %s\n", e.Timestamp, e.Message)
 		}
 	}
 
@@ -343,52 +337,28 @@ func (c *CLI) RunCorrelate(args []string, w io.Writer, cfg integrations.Config) 
 		printBreadcrumbs(w, cd.Breadcrumbs)
 	}
 
-	// Trace — if VT configured and occurrence has trace_id
-	if cfg.VTURL != "" && occTraceID != "" {
+	if cr.Trace != nil {
 		fmt.Fprintln(w)
 		printSection(w, "Trace")
-		td, err := integrations.QueryVictoriaTraces(cfg.VTURL, occTraceID)
-		if err != nil {
-			fmt.Fprintf(w, "  (unavailable: %v)\n", err)
-		} else if td == nil {
-			fmt.Fprintln(w, "  (no trace data)")
-		} else {
-			fmt.Fprintf(w, "  Service: %s\n", td.ServiceName)
-			for _, s := range td.Spans {
-				fmt.Fprintf(w, "  %s  %s\n", s.Duration, s.OperationName)
-			}
+		fmt.Fprintf(w, "  Service: %s\n", cr.Trace.ServiceName)
+		for _, s := range cr.Trace.Spans {
+			fmt.Fprintf(w, "  %s  %s\n", s.Duration, s.OperationName)
 		}
 	}
 
-	// Metrics — if VM configured
-	if cfg.VMURL != "" && !occTime.IsZero() {
+	if cr.Metrics != nil && len(cr.Metrics.Values) > 0 {
 		fmt.Fprintln(w)
 		printSection(w, "Metrics")
-		snap, err := integrations.QueryVictoriaMetrics(cfg.VMURL, occTime)
-		if err != nil {
-			fmt.Fprintf(w, "  (unavailable: %v)\n", err)
-		} else if snap == nil || len(snap.Values) == 0 {
-			fmt.Fprintln(w, "  (no metrics data)")
-		} else {
-			for k, v := range snap.Values {
-				fmt.Fprintf(w, "  %s: %s\n", k, v)
-			}
+		for k, v := range cr.Metrics.Values {
+			fmt.Fprintf(w, "  %s: %s\n", k, v)
 		}
 	}
 
-	// Profile — if Pyroscope configured
-	if cfg.PyroscopeURL != "" && !occTime.IsZero() {
+	if len(cr.Profile) > 0 {
 		fmt.Fprintln(w)
 		printSection(w, "Profile")
-		entries, err := integrations.QueryPyroscope(cfg.PyroscopeURL, cfg.Service, occTime)
-		if err != nil {
-			fmt.Fprintf(w, "  (unavailable: %v)\n", err)
-		} else if len(entries) == 0 {
-			fmt.Fprintln(w, "  (no profile data)")
-		} else {
-			for _, e := range entries {
-				fmt.Fprintf(w, "  %s\n", e.Function)
-			}
+		for _, e := range cr.Profile {
+			fmt.Fprintf(w, "  %s\n", e.Function)
 		}
 	}
 

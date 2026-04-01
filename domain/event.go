@@ -59,6 +59,16 @@ func (e *Event) MessageText() string {
 	return e.Message
 }
 
+// stableMessageText returns a message string suitable for fingerprinting.
+// It prefers the unformatted logentry template (stable across invocations),
+// then falls back to the formatted text with log-framework prefixes stripped.
+func (e *Event) stableMessageText() string {
+	if e.LogEntry != nil && e.LogEntry.Message != "" {
+		return StripLogPrefix(e.LogEntry.Message)
+	}
+	return StripLogPrefix(e.MessageText())
+}
+
 // TraceID extracts the trace_id from contexts.trace safely.
 func (e *Event) TraceID() string {
 	if e.Contexts == nil {
@@ -263,6 +273,18 @@ func ParseDuration(s string) (time.Duration, error) {
 	default:
 		return 0, fmt.Errorf("unknown suffix %q (use h/d/w)", string(suffix))
 	}
+}
+
+// ResolvedError holds metadata about a single error that was resolved.
+type ResolvedError struct {
+	Fingerprint string
+	Type        string
+	Value       string
+	Level       string
+	Count       int
+	FirstSeen   string
+	LastSeen    string
+	ResolvedAt  string
 }
 
 // ParseTag splits "key=value" into (key, value, true) or ("", "", false).

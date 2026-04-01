@@ -255,21 +255,9 @@ func (s *Store) MarkNotified(fp string) error {
 	return err
 }
 
-// ResolvedError holds metadata about a single error that was resolved.
-type ResolvedError struct {
-	Fingerprint string
-	Type        string
-	Value       string
-	Level       string
-	Count       int
-	FirstSeen   string
-	LastSeen    string
-	ResolvedAt  string
-}
-
 // AutoResolve marks errors as resolved if they haven't been seen within olderThan.
 // Returns the list of errors that were resolved and any error encountered.
-func (s *Store) AutoResolve(olderThan time.Duration) ([]ResolvedError, error) {
+func (s *Store) AutoResolve(olderThan time.Duration) ([]domain.ResolvedError, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
 	now := time.Now().UTC().Format(time.RFC3339)
 
@@ -289,9 +277,9 @@ func (s *Store) AutoResolve(olderThan time.Duration) ([]ResolvedError, error) {
 	if err != nil {
 		return nil, err
 	}
-	var resolved []ResolvedError
+	var resolved []domain.ResolvedError
 	for rows.Next() {
-		var r ResolvedError
+		var r domain.ResolvedError
 		if err := rows.Scan(&r.Fingerprint, &r.Type, &r.Value, &r.Level, &r.Count, &r.FirstSeen, &r.LastSeen); err != nil {
 			rows.Close()
 			return nil, err
@@ -406,7 +394,7 @@ type ResolveResult struct {
 	Matched     int64
 	Fingerprint string // full fingerprint of the first matched error
 	ResolvedAt  string
-	Resolved    []ResolvedError // details of resolved errors
+	Resolved    []domain.ResolvedError // details of resolved errors
 }
 
 // Resolve manually marks an error as resolved by fingerprint prefix.
@@ -427,9 +415,9 @@ func (s *Store) Resolve(fpPrefix string) (ResolveResult, error) {
 	if err != nil {
 		return ResolveResult{}, err
 	}
-	var resolved []ResolvedError
+	var resolved []domain.ResolvedError
 	for rows.Next() {
-		var r ResolvedError
+		var r domain.ResolvedError
 		if err := rows.Scan(&r.Fingerprint, &r.Type, &r.Value, &r.Level, &r.Count, &r.FirstSeen, &r.LastSeen); err != nil {
 			rows.Close()
 			return ResolveResult{}, err

@@ -524,53 +524,33 @@ func (h *Handler) HandleCorrelate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	cfg := h.Integrations
+	cr := integrations.Correlate(h.Integrations, occTime, occTraceID)
 
-	// Logs — if unit configured
-	if cfg.Unit != "" && !occTime.IsZero() {
-		entries, err := integrations.QueryJournalctl(cfg.Unit, occTime)
-		if err == nil {
-			for _, e := range entries {
-				result.Logs = append(result.Logs, apiLogEntry{
-					Timestamp: e.Timestamp,
-					Message:   e.Message,
-					Priority:  e.Priority,
-				})
-			}
-		}
+	for _, e := range cr.Logs {
+		result.Logs = append(result.Logs, apiLogEntry{
+			Timestamp: e.Timestamp,
+			Message:   e.Message,
+			Priority:  e.Priority,
+		})
 	}
 
-	// Trace — if VT configured and occurrence has trace_id
-	if cfg.VTURL != "" && occTraceID != "" {
-		td, err := integrations.QueryVictoriaTraces(cfg.VTURL, occTraceID)
-		if err == nil && td != nil {
-			trace := &apiTraceData{ServiceName: td.ServiceName}
-			for _, s := range td.Spans {
-				trace.Spans = append(trace.Spans, apiTraceSpan{
-					OperationName: s.OperationName,
-					Duration:      s.Duration.String(),
-				})
-			}
-			result.Trace = trace
+	if cr.Trace != nil {
+		trace := &apiTraceData{ServiceName: cr.Trace.ServiceName}
+		for _, s := range cr.Trace.Spans {
+			trace.Spans = append(trace.Spans, apiTraceSpan{
+				OperationName: s.OperationName,
+				Duration:      s.Duration.String(),
+			})
 		}
+		result.Trace = trace
 	}
 
-	// Metrics — if VM configured
-	if cfg.VMURL != "" && !occTime.IsZero() {
-		snap, err := integrations.QueryVictoriaMetrics(cfg.VMURL, occTime)
-		if err == nil && snap != nil && len(snap.Values) > 0 {
-			result.Metrics = snap.Values
-		}
+	if cr.Metrics != nil && len(cr.Metrics.Values) > 0 {
+		result.Metrics = cr.Metrics.Values
 	}
 
-	// Profile — if Pyroscope configured
-	if cfg.PyroscopeURL != "" && !occTime.IsZero() {
-		entries, err := integrations.QueryPyroscope(cfg.PyroscopeURL, cfg.Service, occTime)
-		if err == nil {
-			for _, e := range entries {
-				result.Profile = append(result.Profile, apiProfileEntry{Function: e.Function})
-			}
-		}
+	for _, e := range cr.Profile {
+		result.Profile = append(result.Profile, apiProfileEntry{Function: e.Function})
 	}
 
 	writeJSON(w, result)

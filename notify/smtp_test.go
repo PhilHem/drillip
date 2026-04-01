@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/PhilHem/drillip/domain"
-	"github.com/PhilHem/drillip/store"
 )
 
 // --- Resolved notification tests ---
@@ -24,9 +23,9 @@ func TestNotifyResolvedSendsEmail(t *testing.T) {
 		return nil
 	}
 
-	resolved := []store.ResolvedError{
-		{Fingerprint: "abcdef1234567890", Type: "ValueError", Value: "bad input", ResolvedAt: "2026-03-17T10:00:00Z"},
-		{Fingerprint: "1234567890abcdef", Type: "IOError", Value: "connection refused", ResolvedAt: "2026-03-17T10:00:00Z"},
+	resolved := []domain.ResolvedError{
+		{Fingerprint: "abcdef1234567890", Type: "ValueError", Value: "bad input", Level: "error", Count: 5, FirstSeen: "2026-03-10T10:00:00Z", LastSeen: "2026-03-17T09:00:00Z", ResolvedAt: "2026-03-17T10:00:00Z"},
+		{Fingerprint: "1234567890abcdef", Type: "IOError", Value: "connection refused", Level: "error", Count: 1, FirstSeen: "2026-03-17T08:00:00Z", LastSeen: "2026-03-17T08:00:00Z", ResolvedAt: "2026-03-17T10:00:00Z"},
 	}
 
 	n.NotifyResolved(resolved)
@@ -46,7 +45,7 @@ func TestNotifyResolvedEmptyListNoSend(t *testing.T) {
 	}
 
 	n.NotifyResolved(nil)
-	n.NotifyResolved([]store.ResolvedError{})
+	n.NotifyResolved([]domain.ResolvedError{})
 
 	if calls != 0 {
 		t.Fatalf("expected 0 sends for empty resolved list, got %d", calls)
@@ -61,7 +60,7 @@ func TestNotifyResolvedDisabledSMTP(t *testing.T) {
 		return nil
 	}
 
-	n.NotifyResolved([]store.ResolvedError{
+	n.NotifyResolved([]domain.ResolvedError{
 		{Fingerprint: "abcdef1234567890", Type: "ValueError", Value: "bad"},
 	})
 
@@ -71,9 +70,9 @@ func TestNotifyResolvedDisabledSMTP(t *testing.T) {
 }
 
 func TestFormatResolvedHTMLEmail(t *testing.T) {
-	resolved := []store.ResolvedError{
-		{Fingerprint: "abcdef1234567890", Type: "ValueError", Value: "bad input", ResolvedAt: "2026-03-17T10:00:00Z"},
-		{Fingerprint: "1234567890abcdef", Type: "IOError", Value: "connection refused", ResolvedAt: "2026-03-17T10:00:00Z"},
+	resolved := []domain.ResolvedError{
+		{Fingerprint: "abcdef1234567890", Type: "ValueError", Value: "bad input", Level: "error", Count: 42, FirstSeen: "2026-03-10T10:00:00Z", LastSeen: "2026-03-17T09:00:00Z", ResolvedAt: "2026-03-17T10:00:00Z"},
+		{Fingerprint: "1234567890abcdef", Type: "IOError", Value: "connection refused", Level: "warning", Count: 1, FirstSeen: "2026-03-17T08:00:00Z", LastSeen: "2026-03-17T08:00:00Z", ResolvedAt: "2026-03-17T10:00:00Z"},
 	}
 
 	body := formatResolvedHTMLEmail(resolved, "myproject")
@@ -81,18 +80,23 @@ func TestFormatResolvedHTMLEmail(t *testing.T) {
 	for _, want := range []string{
 		"Resolved",
 		"2 errors resolved",
-		"#059669",           // green header background
-		"#d1fae5",           // header label color
-		"#f0fdf4",           // green row background
+		"43 total occurrences",
+		"#059669",   // green header background
+		"#d1fae5",   // header label color
+		"#f0fdf4", // green row background
 		"ValueError",
 		"bad input",
 		"abcdef12",
+		"42&times;", // occurrence count badge
 		"IOError",
 		"connection refused",
 		"12345678",
+		"error",   // level badge
+		"warning", // level badge
 		"drillip top",
 		"drillip recent",
 		"myproject",
+		"Mar 10", // first seen date
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("resolved HTML missing %q", want)
@@ -101,17 +105,20 @@ func TestFormatResolvedHTMLEmail(t *testing.T) {
 }
 
 func TestFormatResolvedPlainEmail(t *testing.T) {
-	resolved := []store.ResolvedError{
-		{Fingerprint: "abcdef1234567890", Type: "ValueError", Value: "bad input", ResolvedAt: "2026-03-17T10:00:00Z"},
-		{Fingerprint: "1234567890abcdef", Type: "IOError", Value: "connection refused", ResolvedAt: "2026-03-17T10:00:00Z"},
+	resolved := []domain.ResolvedError{
+		{Fingerprint: "abcdef1234567890", Type: "ValueError", Value: "bad input", Level: "error", Count: 42, FirstSeen: "2026-03-10T10:00:00Z", LastSeen: "2026-03-17T09:00:00Z", ResolvedAt: "2026-03-17T10:00:00Z"},
+		{Fingerprint: "1234567890abcdef", Type: "IOError", Value: "connection refused", Level: "warning", Count: 1, FirstSeen: "2026-03-17T08:00:00Z", LastSeen: "2026-03-17T08:00:00Z", ResolvedAt: "2026-03-17T10:00:00Z"},
 	}
 
 	text := formatResolvedPlainEmail(resolved, "myproject")
 
 	for _, want := range []string{
-		"RESOLVED: 2 errors in myproject",
-		"1. ValueError: bad input (fp: abcdef12)",
-		"2. IOError: connection refused (fp: 12345678)",
+		"RESOLVED: 2 errors in myproject (43 total occurrences)",
+		"1. [error] ValueError: bad input",
+		"fp: abcdef12",
+		"42x",
+		"2. [warning] IOError: connection refused",
+		"fp: 12345678",
 		"drillip top",
 		"drillip recent",
 	} {
@@ -129,8 +136,8 @@ func TestNotifyResolvedHTMLContainsErrorDetails(t *testing.T) {
 		return nil
 	}
 
-	resolved := []store.ResolvedError{
-		{Fingerprint: "abcdef1234567890", Type: "RuntimeError", Value: "crash", ResolvedAt: "2026-03-17T10:00:00Z"},
+	resolved := []domain.ResolvedError{
+		{Fingerprint: "abcdef1234567890", Type: "RuntimeError", Value: "crash", Level: "error", Count: 1, FirstSeen: "2026-03-17T09:00:00Z", LastSeen: "2026-03-17T09:00:00Z", ResolvedAt: "2026-03-17T10:00:00Z"},
 	}
 
 	n.NotifyResolved(resolved)
@@ -677,54 +684,8 @@ func TestFormatDuration(t *testing.T) {
 	}
 }
 
-func TestSilencedFingerprintSkipsNotification(t *testing.T) {
-	s, err := store.Open(t.TempDir() + "/test.db")
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
-
-	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, s)
-	calls := 0
-	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
-		calls++
-		return nil
-	}
-
-	fp := "silenced12345678"
-	if err := s.Silence(fp, nil, "test silence"); err != nil {
-		t.Fatalf("silence: %v", err)
-	}
-
-	ev := &domain.Event{Message: "test"}
-	n.NotifyNewError(ev, fp, false, 0)
-
-	if calls != 0 {
-		t.Fatalf("expected 0 sends for silenced fingerprint, got %d", calls)
-	}
-}
-
-func TestNonSilencedFingerprintSendsNotification(t *testing.T) {
-	s, err := store.Open(t.TempDir() + "/test.db")
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
-
-	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, s)
-	calls := 0
-	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
-		calls++
-		return nil
-	}
-
-	ev := &domain.Event{Message: "test"}
-	n.NotifyNewError(ev, "notsilenced12345", false, 0)
-
-	if calls != 1 {
-		t.Fatalf("expected 1 send for non-silenced fingerprint, got %d", calls)
-	}
-}
+// Silence check tests moved to ingest/ — silence is now checked by the caller,
+// not by the Notifier. See ingest/handler_test.go.
 
 // --- Digest tests ---
 

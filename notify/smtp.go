@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/PhilHem/drillip/domain"
-	"github.com/PhilHem/drillip/store"
 )
 
 // SMTPConfig holds email notification settings.
@@ -44,11 +43,11 @@ func (c SMTPConfig) Addr() string {
 // Notifier holds cooldown state and sends email notifications.
 // It is safe for concurrent use from multiple goroutines.
 type Notifier struct {
-	SMTP     SMTPConfig
-	Project  string
-	Cooldown time.Duration
-	Digest   time.Duration // batch window; 0 means send immediately
-	Store    *store.Store  // for silence checks
+	SMTP       SMTPConfig
+	Project    string
+	Cooldown   time.Duration
+	Digest     time.Duration  // batch window; 0 means send immediately
+	onNotified func(string)   // called after send with fingerprint; nil = no-op
 
 	mu       sync.Mutex
 	lastSent time.Time
@@ -70,16 +69,18 @@ type pendingNotification struct {
 }
 
 // NewNotifier creates a Notifier with the given SMTP config, project name,
-// cooldown duration, digest window, and store.
+// cooldown duration, digest window, and onNotified callback.
 // A zero digest duration means notifications are sent immediately (no batching).
-func NewNotifier(smtpCfg SMTPConfig, project string, cooldown, digest time.Duration, st *store.Store) *Notifier {
+// The onNotified callback is called with the fingerprint after each successful send;
+// pass nil to disable.
+func NewNotifier(smtpCfg SMTPConfig, project string, cooldown, digest time.Duration, onNotified func(string)) *Notifier {
 	return &Notifier{
-		SMTP:     smtpCfg,
-		Project:  project,
-		Cooldown: cooldown,
-		Digest:   digest,
-		Store:    st,
-		recent:   make(map[string]time.Time),
+		SMTP:       smtpCfg,
+		Project:    project,
+		Cooldown:   cooldown,
+		Digest:     digest,
+		onNotified: onNotified,
+		recent:     make(map[string]time.Time),
 	}
 }
 
@@ -132,11 +133,6 @@ func (n *Notifier) NotifyNewError(ev *domain.Event, fp string, regression bool, 
 		return
 	}
 
-	if n.Store != nil && n.Store.IsSilenced(fp) {
-		slog.Info("notify: silenced fingerprint, skipping", "fingerprint", fp[:8])
-		return
-	}
-
 	n.mu.Lock()
 	ok := n.shouldNotify(fp)
 	if !ok {
@@ -181,6 +177,7 @@ func (n *Notifier) sendIndividual(ev *domain.Event, fp string, regression bool, 
 	}
 
 	n.send(subject, textBody, htmlBody)
+	n.markNotified(fp)
 }
 
 // send transmits an email via SMTP with retry and exponential backoff.
@@ -345,6 +342,10 @@ func (n *Notifier) flush() {
 	htmlBody := formatDigestHTMLEmail(items, n.Project)
 	textBody := formatDigestPlainEmail(items)
 	n.send(subject, textBody, htmlBody)
+
+	for _, p := range items {
+		n.markNotified(p.Fingerprint)
+	}
 }
 
 // Close stops any pending digest timer and flushes buffered notifications.
@@ -359,9 +360,17 @@ func (n *Notifier) Close() {
 	n.flush()
 }
 
+// markNotified records that a notification was sent for the given fingerprint,
+// so the resolved email only includes errors the user actually heard about.
+func (n *Notifier) markNotified(fp string) {
+	if n.onNotified != nil {
+		n.onNotified(fp)
+	}
+}
+
 // NotifyResolved sends an email summarizing errors that were resolved.
 // Safe to call from a goroutine.
-func (n *Notifier) NotifyResolved(resolved []store.ResolvedError) {
+func (n *Notifier) NotifyResolved(resolved []domain.ResolvedError) {
 	if !n.SMTP.Enabled() || len(resolved) == 0 {
 		return
 	}
@@ -374,8 +383,14 @@ func (n *Notifier) NotifyResolved(resolved []store.ResolvedError) {
 
 // --- Resolved email formats ---
 
-func formatResolvedHTMLEmail(resolved []store.ResolvedError, project string) string {
+func formatResolvedHTMLEmail(resolved []domain.ResolvedError, project string) string {
 	var b strings.Builder
+
+	// Compute summary stats
+	totalOccurrences := 0
+	for _, r := range resolved {
+		totalOccurrences += r.Count
+	}
 
 	// Document start + outer table
 	b.WriteString(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="color-scheme" content="light only"><meta name="supported-color-schemes" content="light only"></head>`)
@@ -392,42 +407,58 @@ func formatResolvedHTMLEmail(resolved []store.ResolvedError, project string) str
 	}
 	b.WriteString(`</td></tr></table></td></tr>`)
 
-	// Header — green
+	// Header — green with summary stats
 	b.WriteString(`<tr><td style="background-color:#059669;padding:24px 40px;">`)
 	b.WriteString(`<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>`)
-	b.WriteString(fmt.Sprintf(`<td><p style="margin:0;color:#d1fae5;font-size:13px;text-transform:uppercase;letter-spacing:0.5px;">Resolved</p><p style="margin:8px 0 0 0;color:#ffffff;font-size:20px;font-weight:600;">%d errors resolved</p></td>`, len(resolved)))
-	b.WriteString(`</tr></table></td></tr>`)
+	b.WriteString(fmt.Sprintf(`<td><p style="margin:0;color:#d1fae5;font-size:13px;text-transform:uppercase;letter-spacing:0.5px;">Resolved</p><p style="margin:8px 0 0 0;color:#ffffff;font-size:20px;font-weight:600;">%d errors resolved</p>`, len(resolved)))
+	if totalOccurrences > len(resolved) {
+		b.WriteString(fmt.Sprintf(`<p style="margin:4px 0 0 0;color:#a7f3d0;font-size:13px;">%d total occurrences</p>`, totalOccurrences))
+	}
+	b.WriteString(`</td></tr></table></td></tr>`)
 
-	// Error table
+	// Error rows — compact badge style, one block per error.
 	b.WriteString(`<tr><td style="padding:32px 40px;">`)
-	b.WriteString(`<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;">`)
 
-	// Table header
-	b.WriteString(`<tr style="background-color:#f8fafc;">`)
-	b.WriteString(`<td style="padding:8px 12px;color:#64748b;font-size:12px;font-weight:600;">Type</td>`)
-	b.WriteString(`<td style="padding:8px 12px;color:#64748b;font-size:12px;font-weight:600;">Value</td>`)
-	b.WriteString(`<td style="padding:8px 12px;color:#64748b;font-size:12px;font-weight:600;">Fingerprint</td>`)
-	b.WriteString(`</tr>`)
-
-	// One row per resolved error
-	for _, r := range resolved {
+	for i, r := range resolved {
 		fpShort := r.Fingerprint
 		if len(fpShort) > 8 {
 			fpShort = fpShort[:8]
 		}
-		evValue := r.Value
-		if len(evValue) > 50 {
-			evValue = evValue[:47] + "..."
+		evValue := domain.StripLogPrefix(r.Value)
+		levelColor, levelBg := resolvedLevelStyle(r.Level)
+
+		if i > 0 {
+			b.WriteString(`<div style="height:8px;"></div>`)
 		}
 
-		b.WriteString(`<tr style="background-color:#f0fdf4;">`)
-		b.WriteString(fmt.Sprintf(`<td style="padding:10px 12px;border-top:1px solid #e2e8f0;color:#1e293b;font-size:13px;font-weight:600;font-family:'SF Mono',Monaco,'Courier New',monospace;">%s</td>`, html.EscapeString(r.Type)))
-		b.WriteString(fmt.Sprintf(`<td style="padding:10px 12px;border-top:1px solid #e2e8f0;color:#475569;font-size:13px;">%s</td>`, html.EscapeString(evValue)))
-		b.WriteString(fmt.Sprintf(`<td style="padding:10px 12px;border-top:1px solid #e2e8f0;font-family:'SF Mono',Monaco,'Courier New',monospace;font-size:12px;color:#64748b;">%s</td>`, html.EscapeString(fpShort)))
-		b.WriteString(`</tr>`)
+		b.WriteString(`<div style="border:1px solid #d1fae5;border-radius:6px;overflow:hidden;">`)
+
+		// Main row: type + value + count badge + level badge
+		b.WriteString(`<div style="padding:12px 16px;background-color:#f0fdf4;">`)
+		b.WriteString(`<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>`)
+		b.WriteString(fmt.Sprintf(`<td style="width:1%%;white-space:nowrap;padding-right:10px;vertical-align:top;"><span style="color:#1e293b;font-size:13px;font-weight:600;font-family:'SF Mono',Monaco,'Courier New',monospace;">%s</span></td>`, html.EscapeString(r.Type)))
+		b.WriteString(fmt.Sprintf(`<td style="color:#475569;font-size:13px;line-height:1.4;vertical-align:top;word-break:break-word;">%s</td>`, html.EscapeString(evValue)))
+		b.WriteString(`<td style="width:1%%;white-space:nowrap;text-align:right;vertical-align:top;padding-left:10px;">`)
+		if r.Count > 1 {
+			b.WriteString(fmt.Sprintf(`<span style="display:inline-block;padding:2px 6px;border-radius:10px;background-color:#e2e8f0;color:#475569;font-size:11px;font-weight:500;margin-right:4px;">%d&times;</span>`, r.Count))
+		}
+		b.WriteString(fmt.Sprintf(`<span style="display:inline-block;padding:2px 8px;border-radius:10px;background-color:%s;color:%s;font-size:11px;font-weight:500;">%s</span>`, levelBg, levelColor, html.EscapeString(r.Level)))
+		b.WriteString(`</td></tr></table></div>`)
+
+		// Footer: fingerprint + time span
+		timeSpan := resolvedTimeSpan(r.FirstSeen, r.LastSeen)
+		b.WriteString(`<div style="padding:6px 16px;background-color:#f8fafc;border-top:1px solid #e2e8f0;">`)
+		b.WriteString(`<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>`)
+		b.WriteString(fmt.Sprintf(`<td style="color:#94a3b8;font-size:11px;font-family:'SF Mono',Monaco,'Courier New',monospace;">%s</td>`, html.EscapeString(fpShort)))
+		if timeSpan != "" {
+			b.WriteString(fmt.Sprintf(`<td style="color:#94a3b8;font-size:11px;text-align:right;">%s</td>`, timeSpan))
+		}
+		b.WriteString(`</tr></table></div>`)
+
+		b.WriteString(`</div>`)
 	}
 
-	b.WriteString(`</table></td></tr>`)
+	b.WriteString(`</td></tr>`)
 
 	// CLI hint
 	b.WriteString(`<tr><td style="padding:0 40px 32px 40px;">`)
@@ -444,22 +475,84 @@ func formatResolvedHTMLEmail(resolved []store.ResolvedError, project string) str
 	return b.String()
 }
 
-func formatResolvedPlainEmail(resolved []store.ResolvedError, project string) string {
+// resolvedLevelStyle returns (text color, background color) for level badges.
+func resolvedLevelStyle(level string) (string, string) {
+	switch level {
+	case "fatal":
+		return "#991b1b", "#fef2f2"
+	case "error":
+		return "#b91c1c", "#fef2f2"
+	case "warning":
+		return "#92400e", "#fffbeb"
+	case "info":
+		return "#0c4a6e", "#f0f9ff"
+	case "debug":
+		return "#64748b", "#f8fafc"
+	default:
+		return "#64748b", "#f1f5f9"
+	}
+}
+
+// resolvedTimeSpan returns a human-readable time span like "Mar 13 – Mar 25".
+func resolvedTimeSpan(firstSeen, lastSeen string) string {
+	f, errF := time.Parse(time.RFC3339, firstSeen)
+	l, errL := time.Parse(time.RFC3339, lastSeen)
+	if errF != nil || errL != nil {
+		return ""
+	}
+	if f.Format("2006-01-02") == l.Format("2006-01-02") {
+		return f.Format("Jan 2")
+	}
+	return f.Format("Jan 2") + " &ndash; " + l.Format("Jan 2")
+}
+
+func formatResolvedPlainEmail(resolved []domain.ResolvedError, project string) string {
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("RESOLVED: %d errors in %s\n\n", len(resolved), project))
+	totalOccurrences := 0
+	for _, r := range resolved {
+		totalOccurrences += r.Count
+	}
+
+	b.WriteString(fmt.Sprintf("RESOLVED: %d errors in %s", len(resolved), project))
+	if totalOccurrences > len(resolved) {
+		b.WriteString(fmt.Sprintf(" (%d total occurrences)", totalOccurrences))
+	}
+	b.WriteString("\n\n")
 
 	for i, r := range resolved {
 		fpShort := r.Fingerprint
 		if len(fpShort) > 8 {
 			fpShort = fpShort[:8]
 		}
-		b.WriteString(fmt.Sprintf("%d. %s: %s (fp: %s)\n", i+1, r.Type, r.Value, fpShort))
+		evValue := domain.StripLogPrefix(r.Value)
+
+		b.WriteString(fmt.Sprintf("%d. [%s] %s: %s\n", i+1, r.Level, r.Type, evValue))
+		b.WriteString(fmt.Sprintf("   fp: %s", fpShort))
+		if r.Count > 1 {
+			b.WriteString(fmt.Sprintf("  |  %dx", r.Count))
+		}
+		if r.FirstSeen != "" {
+			b.WriteString(fmt.Sprintf("  |  %s", resolvedTimeSpanPlain(r.FirstSeen, r.LastSeen)))
+		}
+		b.WriteString("\n\n")
 	}
 
-	b.WriteString("\n---\nView status:\n  drillip top\n  drillip recent\n")
+	b.WriteString("---\nView status:\n  drillip top\n  drillip recent\n")
 
 	return b.String()
+}
+
+func resolvedTimeSpanPlain(firstSeen, lastSeen string) string {
+	f, errF := time.Parse(time.RFC3339, firstSeen)
+	l, errL := time.Parse(time.RFC3339, lastSeen)
+	if errF != nil || errL != nil {
+		return ""
+	}
+	if f.Format("2006-01-02") == l.Format("2006-01-02") {
+		return f.Format("Jan 2")
+	}
+	return f.Format("Jan 2") + " – " + l.Format("Jan 2")
 }
 
 // --- Digest email formats ---

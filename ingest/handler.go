@@ -124,7 +124,11 @@ func MakeHandler(s *store.Store, notifier *notify.Notifier) http.HandlerFunc {
 		slog.Debug("event stored", "fingerprint", result.Fingerprint, "type", evType, "new", result.IsNew, "regression", result.IsRegression)
 
 		if (result.IsNew || result.IsRegression) && notifier != nil {
-			go notifier.NotifyNewError(event, result.Fingerprint, result.IsRegression, result.ResolvedDuration)
+			if s.IsSilenced(result.Fingerprint) {
+				slog.Info("notify: silenced fingerprint, skipping", "fingerprint", result.Fingerprint[:8])
+			} else {
+				go notifier.NotifyNewError(event, result.Fingerprint, result.IsRegression, result.ResolvedDuration)
+			}
 		}
 
 		w.Header().Set("Content-Type", "application/json")
