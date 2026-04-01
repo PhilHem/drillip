@@ -41,7 +41,7 @@ func TestOccurrenceInsertion(t *testing.T) {
 	}
 
 	var occCount int
-	if err := s.DB.QueryRow("SELECT COUNT(*) FROM occurrences").Scan(&occCount); err != nil {
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM occurrences").Scan(&occCount); err != nil {
 		t.Fatalf("query: %v", err)
 	}
 	if occCount != 1 {
@@ -52,7 +52,7 @@ func TestOccurrenceInsertion(t *testing.T) {
 	if _, err := s.StoreEvent(&event); err != nil {
 		t.Fatalf("store: %v", err)
 	}
-	if err := s.DB.QueryRow("SELECT COUNT(*) FROM occurrences").Scan(&occCount); err != nil {
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM occurrences").Scan(&occCount); err != nil {
 		t.Fatalf("query: %v", err)
 	}
 	if occCount != 2 {
@@ -61,7 +61,7 @@ func TestOccurrenceInsertion(t *testing.T) {
 
 	// Verify release_tag
 	var release string
-	if err := s.DB.QueryRow("SELECT release_tag FROM occurrences LIMIT 1").Scan(&release); err != nil {
+	if err := s.db.QueryRow("SELECT release_tag FROM occurrences LIMIT 1").Scan(&release); err != nil {
 		t.Fatalf("query: %v", err)
 	}
 	if release != "v3.0.0" {
@@ -123,7 +123,7 @@ func TestOccurrenceTraceID(t *testing.T) {
 	}
 
 	var traceID string
-	if err := s.DB.QueryRow("SELECT trace_id FROM occurrences LIMIT 1").Scan(&traceID); err != nil {
+	if err := s.db.QueryRow("SELECT trace_id FROM occurrences LIMIT 1").Scan(&traceID); err != nil {
 		t.Fatalf("query: %v", err)
 	}
 	if traceID != "deadbeef12345678" {
@@ -150,8 +150,13 @@ func TestAutoResolve(t *testing.T) {
 
 	// Backdate last_seen to 48 hours ago
 	oldTime := time.Now().UTC().Add(-48 * time.Hour).Format(time.RFC3339)
-	if _, err := s.DB.Exec("UPDATE errors SET last_seen = ? WHERE fingerprint = ?", oldTime, result.Fingerprint); err != nil {
+	if _, err := s.db.Exec("UPDATE errors SET last_seen = ? WHERE fingerprint = ?", oldTime, result.Fingerprint); err != nil {
 		t.Fatalf("backdate: %v", err)
+	}
+
+	// Mark as notified — auto-resolve only reports notified errors
+	if err := s.MarkNotified(result.Fingerprint); err != nil {
+		t.Fatalf("mark notified: %v", err)
 	}
 
 	// Auto-resolve with 24h threshold
@@ -165,11 +170,48 @@ func TestAutoResolve(t *testing.T) {
 
 	// Verify resolved_at is set
 	var resolvedAt sql.NullString
-	if err := s.DB.QueryRow("SELECT resolved_at FROM errors WHERE fingerprint = ?", result.Fingerprint).Scan(&resolvedAt); err != nil {
+	if err := s.db.QueryRow("SELECT resolved_at FROM errors WHERE fingerprint = ?", result.Fingerprint).Scan(&resolvedAt); err != nil {
 		t.Fatalf("query: %v", err)
 	}
 	if !resolvedAt.Valid || resolvedAt.String == "" {
 		t.Fatal("expected resolved_at to be set")
+	}
+}
+
+func TestAutoResolveExcludesUnnotified(t *testing.T) {
+	s := setupStore(t)
+
+	// Store two errors
+	notifiedEvent := domain.Event{Message: "notified error"}
+	silentEvent := domain.Event{Message: "silent error"}
+
+	r1, _ := s.StoreEvent(&notifiedEvent)
+	r2, _ := s.StoreEvent(&silentEvent)
+
+	// Backdate both
+	old := time.Now().UTC().Add(-48 * time.Hour).Format(time.RFC3339)
+	s.db.Exec("UPDATE errors SET last_seen = ? WHERE fingerprint IN (?, ?)", old, r1.Fingerprint, r2.Fingerprint)
+
+	// Only mark the first as notified
+	s.MarkNotified(r1.Fingerprint)
+
+	// Auto-resolve — only the notified one should be in the returned list
+	resolved, err := s.AutoResolve(24 * time.Hour)
+	if err != nil {
+		t.Fatalf("auto-resolve: %v", err)
+	}
+	if len(resolved) != 1 {
+		t.Fatalf("expected 1 resolved (notified only), got %d", len(resolved))
+	}
+	if resolved[0].Fingerprint != r1.Fingerprint {
+		t.Fatalf("expected notified fingerprint %s, got %s", r1.Fingerprint, resolved[0].Fingerprint)
+	}
+
+	// But BOTH should be resolved in the DB
+	var count int
+	s.db.QueryRow("SELECT COUNT(*) FROM errors WHERE resolved_at IS NOT NULL").Scan(&count)
+	if count != 2 {
+		t.Fatalf("expected 2 errors resolved in DB, got %d", count)
 	}
 }
 
@@ -206,7 +248,7 @@ func TestManualResolve(t *testing.T) {
 
 	// Verify resolved_at is set
 	var resolvedAt sql.NullString
-	if err := s.DB.QueryRow("SELECT resolved_at FROM errors WHERE fingerprint = ?", result.Fingerprint).Scan(&resolvedAt); err != nil {
+	if err := s.db.QueryRow("SELECT resolved_at FROM errors WHERE fingerprint = ?", result.Fingerprint).Scan(&resolvedAt); err != nil {
 		t.Fatalf("query: %v", err)
 	}
 	if !resolvedAt.Valid || resolvedAt.String == "" {
@@ -254,7 +296,7 @@ func TestRegressionDetection(t *testing.T) {
 
 	// Verify it's resolved
 	var resolvedAt sql.NullString
-	if err := s.DB.QueryRow("SELECT resolved_at FROM errors WHERE fingerprint = ?", result.Fingerprint).Scan(&resolvedAt); err != nil {
+	if err := s.db.QueryRow("SELECT resolved_at FROM errors WHERE fingerprint = ?", result.Fingerprint).Scan(&resolvedAt); err != nil {
 		t.Fatalf("query: %v", err)
 	}
 	if !resolvedAt.Valid || resolvedAt.String == "" {
@@ -274,7 +316,7 @@ func TestRegressionDetection(t *testing.T) {
 	}
 
 	// Verify resolved_at is cleared
-	if err := s.DB.QueryRow("SELECT resolved_at FROM errors WHERE fingerprint = ?", result.Fingerprint).Scan(&resolvedAt); err != nil {
+	if err := s.db.QueryRow("SELECT resolved_at FROM errors WHERE fingerprint = ?", result.Fingerprint).Scan(&resolvedAt); err != nil {
 		t.Fatalf("query: %v", err)
 	}
 	if resolvedAt.Valid && resolvedAt.String != "" {
@@ -302,7 +344,7 @@ func TestRegressionResolvedDuration(t *testing.T) {
 
 	// Resolve and backdate resolved_at to 3 hours ago
 	resolvedTime := time.Now().UTC().Add(-3 * time.Hour).Format(time.RFC3339)
-	if _, err := s.DB.Exec("UPDATE errors SET resolved_at = ? WHERE fingerprint = ?", resolvedTime, result.Fingerprint); err != nil {
+	if _, err := s.db.Exec("UPDATE errors SET resolved_at = ? WHERE fingerprint = ?", resolvedTime, result.Fingerprint); err != nil {
 		t.Fatalf("backdate resolved_at: %v", err)
 	}
 
@@ -499,9 +541,9 @@ func TestGetTagDistribution(t *testing.T) {
 
 	// Insert additional occurrences with tags
 	now := time.Now().UTC().Format(time.RFC3339)
-	s.DB.Exec(`INSERT INTO occurrences (fingerprint, timestamp, tags) VALUES (?,?,?)`,
+	s.db.Exec(`INSERT INTO occurrences (fingerprint, timestamp, tags) VALUES (?,?,?)`,
 		result.Fingerprint, now, `{"server":"web-1"}`)
-	s.DB.Exec(`INSERT INTO occurrences (fingerprint, timestamp, tags) VALUES (?,?,?)`,
+	s.db.Exec(`INSERT INTO occurrences (fingerprint, timestamp, tags) VALUES (?,?,?)`,
 		result.Fingerprint, now, `{"server":"web-2"}`)
 
 	dist := s.GetTagDistribution(result.Fingerprint)
@@ -595,21 +637,21 @@ func TestGCOccurrences(t *testing.T) {
 
 	// Insert an old occurrence (100 days ago)
 	oldTime := time.Now().UTC().Add(-100 * 24 * time.Hour).Format(time.RFC3339)
-	if _, err := s.DB.Exec(`INSERT INTO occurrences (fingerprint, timestamp) VALUES (?, ?)`,
+	if _, err := s.db.Exec(`INSERT INTO occurrences (fingerprint, timestamp) VALUES (?, ?)`,
 		result.Fingerprint, oldTime); err != nil {
 		t.Fatalf("insert old: %v", err)
 	}
 
 	// Insert a recent occurrence (1 hour ago)
 	recentTime := time.Now().UTC().Add(-1 * time.Hour).Format(time.RFC3339)
-	if _, err := s.DB.Exec(`INSERT INTO occurrences (fingerprint, timestamp) VALUES (?, ?)`,
+	if _, err := s.db.Exec(`INSERT INTO occurrences (fingerprint, timestamp) VALUES (?, ?)`,
 		result.Fingerprint, recentTime); err != nil {
 		t.Fatalf("insert recent: %v", err)
 	}
 
 	// We now have 3 occurrences: 1 from StoreEvent (now), 1 old, 1 recent
 	var total int
-	if err := s.DB.QueryRow("SELECT COUNT(*) FROM occurrences").Scan(&total); err != nil {
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM occurrences").Scan(&total); err != nil {
 		t.Fatalf("count: %v", err)
 	}
 	if total != 3 {
@@ -627,7 +669,7 @@ func TestGCOccurrences(t *testing.T) {
 	}
 
 	// Verify 2 remain
-	if err := s.DB.QueryRow("SELECT COUNT(*) FROM occurrences").Scan(&total); err != nil {
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM occurrences").Scan(&total); err != nil {
 		t.Fatalf("count after gc: %v", err)
 	}
 	if total != 2 {

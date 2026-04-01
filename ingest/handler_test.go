@@ -32,7 +32,7 @@ func TestHandleHealth(t *testing.T) {
 	s := setupStore(t)
 	req := httptest.NewRequest(http.MethodGet, "/-/healthy", nil)
 	w := httptest.NewRecorder()
-	HandleHealth(s.DB)(w, req)
+	HandleHealth(s)(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
@@ -78,7 +78,7 @@ func TestHandlePlainJSONEvent(t *testing.T) {
 
 	// Verify stored
 	var count int
-	if err := s.DB.QueryRow("SELECT count FROM errors WHERE type = 'RuntimeError'").Scan(&count); err != nil {
+	if err := s.RawDB().QueryRow("SELECT count FROM errors WHERE type = 'RuntimeError'").Scan(&count); err != nil {
 		t.Fatalf("query: %v", err)
 	}
 	if count != 1 {
@@ -90,7 +90,7 @@ func TestHandlePlainJSONEvent(t *testing.T) {
 	w = httptest.NewRecorder()
 	MakeHandler(s, nil)(w, req)
 
-	if err := s.DB.QueryRow("SELECT count FROM errors WHERE type = 'RuntimeError'").Scan(&count); err != nil {
+	if err := s.RawDB().QueryRow("SELECT count FROM errors WHERE type = 'RuntimeError'").Scan(&count); err != nil {
 		t.Fatalf("query: %v", err)
 	}
 	if count != 2 {
@@ -133,7 +133,7 @@ func TestHandleEnvelopeEvent(t *testing.T) {
 	}
 
 	var typ, release string
-	if err := s.DB.QueryRow("SELECT type, release_tag FROM errors WHERE type = 'ValueError'").Scan(&typ, &release); err != nil {
+	if err := s.RawDB().QueryRow("SELECT type, release_tag FROM errors WHERE type = 'ValueError'").Scan(&typ, &release); err != nil {
 		t.Fatalf("query: %v", err)
 	}
 	if typ != "ValueError" || release != "v2.0.0" {
@@ -175,7 +175,7 @@ func TestHandleBrotliEnvelope(t *testing.T) {
 	}
 
 	var typ string
-	if err := s.DB.QueryRow("SELECT type FROM errors WHERE type = 'BrotliError'").Scan(&typ); err != nil {
+	if err := s.RawDB().QueryRow("SELECT type FROM errors WHERE type = 'BrotliError'").Scan(&typ); err != nil {
 		t.Fatalf("query: %v", err)
 	}
 	if typ != "BrotliError" {
@@ -216,7 +216,7 @@ func TestHandleGzipEnvelope(t *testing.T) {
 	}
 
 	var typ string
-	if err := s.DB.QueryRow("SELECT type FROM errors WHERE type = 'GzipError'").Scan(&typ); err != nil {
+	if err := s.RawDB().QueryRow("SELECT type FROM errors WHERE type = 'GzipError'").Scan(&typ); err != nil {
 		t.Fatalf("query: %v", err)
 	}
 	if typ != "GzipError" {
@@ -238,7 +238,7 @@ func TestHandleEmptyEvent(t *testing.T) {
 	}
 
 	var count int
-	if err := s.DB.QueryRow("SELECT COUNT(*) FROM errors").Scan(&count); err != nil {
+	if err := s.RawDB().QueryRow("SELECT COUNT(*) FROM errors").Scan(&count); err != nil {
 		t.Fatalf("query: %v", err)
 	}
 	if count != 0 {
@@ -270,7 +270,7 @@ func TestHandleMessageEvent(t *testing.T) {
 	}
 
 	var typ, val, level string
-	if err := s.DB.QueryRow("SELECT type, value, level FROM errors WHERE type = 'message'").Scan(&typ, &val, &level); err != nil {
+	if err := s.RawDB().QueryRow("SELECT type, value, level FROM errors WHERE type = 'message'").Scan(&typ, &val, &level); err != nil {
 		t.Fatalf("query: %v", err)
 	}
 	if typ != "message" {
@@ -298,7 +298,7 @@ func TestHandleMessageWithPlainField(t *testing.T) {
 	}
 
 	var val, level string
-	if err := s.DB.QueryRow("SELECT value, level FROM errors WHERE value = 'disk space low'").Scan(&val, &level); err != nil {
+	if err := s.RawDB().QueryRow("SELECT value, level FROM errors WHERE value = 'disk space low'").Scan(&val, &level); err != nil {
 		t.Fatalf("query: %v", err)
 	}
 	if level != "warning" {
@@ -328,7 +328,7 @@ func TestIngestReturnsFingerprint(t *testing.T) {
 
 	// Verify the returned fingerprint matches what's in the DB
 	var count int
-	if err := s.DB.QueryRow("SELECT count FROM errors WHERE fingerprint = ?", fp).Scan(&count); err != nil {
+	if err := s.RawDB().QueryRow("SELECT count FROM errors WHERE fingerprint = ?", fp).Scan(&count); err != nil {
 		t.Fatalf("fingerprint %q not found in DB: %v", fp, err)
 	}
 }
@@ -373,7 +373,7 @@ func TestRegressionTriggersNotification(t *testing.T) {
 
 	// Get fingerprint to resolve it
 	var fp string
-	if err := s.DB.QueryRow("SELECT fingerprint FROM errors WHERE type = 'RegError'").Scan(&fp); err != nil {
+	if err := s.RawDB().QueryRow("SELECT fingerprint FROM errors WHERE type = 'RegError'").Scan(&fp); err != nil {
 		t.Fatalf("query fp: %v", err)
 	}
 	if _, err := s.Resolve(fp); err != nil {

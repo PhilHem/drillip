@@ -12,7 +12,13 @@ import (
 
 // Store wraps the SQLite database connection.
 type Store struct {
-	DB *sql.DB
+	db *sql.DB
+}
+
+// RawDB returns the underlying *sql.DB.
+// It exists for test fixture setup in external packages.
+func (s *Store) RawDB() *sql.DB {
+	return s.db
 }
 
 // Open creates a new Store backed by the SQLite database at path.
@@ -81,7 +87,7 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 
-	s := &Store{DB: sqlDB}
+	s := &Store{db: sqlDB}
 	if err := s.migrateDB(); err != nil {
 		sqlDB.Close()
 		return nil, err
@@ -91,12 +97,12 @@ func Open(path string) (*Store, error) {
 
 // Close closes the underlying database connection.
 func (s *Store) Close() error {
-	return s.DB.Close()
+	return s.db.Close()
 }
 
 // Checkpoint runs a WAL checkpoint.
 func (s *Store) Checkpoint() error {
-	_, err := s.DB.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	_, err := s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 	return err
 }
 
@@ -111,13 +117,14 @@ func (s *Store) migrateDB() error {
 		{"errors", "level", `ALTER TABLE errors ADD COLUMN level TEXT DEFAULT 'error'`},
 		{"occurrences", "tags", `ALTER TABLE occurrences ADD COLUMN tags TEXT`},
 		{"errors", "resolved_at", `ALTER TABLE errors ADD COLUMN resolved_at TEXT`},
+		{"errors", "notified_at", `ALTER TABLE errors ADD COLUMN notified_at TEXT`},
 	}
 
 	for _, m := range migrations {
 		if s.columnExists(m.table, m.column) {
 			continue
 		}
-		if _, err := s.DB.Exec(m.ddl); err != nil {
+		if _, err := s.db.Exec(m.ddl); err != nil {
 			return fmt.Errorf("migrate %s.%s: %w", m.table, m.column, err)
 		}
 	}
@@ -125,7 +132,7 @@ func (s *Store) migrateDB() error {
 }
 
 func (s *Store) columnExists(table, column string) bool {
-	rows, err := s.DB.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
 	if err != nil {
 		return false
 	}
@@ -171,7 +178,7 @@ func (s *Store) StoreEvent(ev *domain.Event) (StoreResult, error) {
 		}
 	} else {
 		evType = "message"
-		evValue = ev.MessageText()
+		evValue = domain.StripLogPrefix(ev.MessageText())
 	}
 
 	var breadcrumbsJSON string
@@ -190,7 +197,7 @@ func (s *Store) StoreEvent(ev *domain.Event) (StoreResult, error) {
 		}
 	}
 
-	tx, err := s.DB.Begin()
+	tx, err := s.db.Begin()
 	if err != nil {
 		return StoreResult{}, err
 	}
@@ -239,11 +246,24 @@ func (s *Store) StoreEvent(ev *domain.Event) (StoreResult, error) {
 	return StoreResult{Fingerprint: fp, IsNew: isNew, IsRegression: isRegression, ResolvedDuration: resolvedDuration}, tx.Commit()
 }
 
+// MarkNotified records that a notification was sent for the given fingerprint.
+// This is used to filter resolved emails — only errors that were actually
+// communicated to the user will appear in resolved digests.
+func (s *Store) MarkNotified(fp string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.Exec(`UPDATE errors SET notified_at = ? WHERE fingerprint = ?`, now, fp)
+	return err
+}
+
 // ResolvedError holds metadata about a single error that was resolved.
 type ResolvedError struct {
 	Fingerprint string
 	Type        string
 	Value       string
+	Level       string
+	Count       int
+	FirstSeen   string
+	LastSeen    string
 	ResolvedAt  string
 }
 
@@ -253,15 +273,17 @@ func (s *Store) AutoResolve(olderThan time.Duration) ([]ResolvedError, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339)
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	tx, err := s.DB.Begin()
+	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// Collect details of errors about to be resolved
+	// Collect details of errors about to be resolved — only include
+	// errors that were previously notified about, so the resolved email
+	// doesn't contain noise the user never heard about.
 	rows, err := tx.Query(
-		`SELECT fingerprint, type, value FROM errors WHERE resolved_at IS NULL AND last_seen < ?`,
+		`SELECT fingerprint, type, value, level, count, first_seen, last_seen FROM errors WHERE resolved_at IS NULL AND last_seen < ? AND notified_at IS NOT NULL`,
 		cutoff,
 	)
 	if err != nil {
@@ -270,7 +292,7 @@ func (s *Store) AutoResolve(olderThan time.Duration) ([]ResolvedError, error) {
 	var resolved []ResolvedError
 	for rows.Next() {
 		var r ResolvedError
-		if err := rows.Scan(&r.Fingerprint, &r.Type, &r.Value); err != nil {
+		if err := rows.Scan(&r.Fingerprint, &r.Type, &r.Value, &r.Level, &r.Count, &r.FirstSeen, &r.LastSeen); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -282,11 +304,7 @@ func (s *Store) AutoResolve(olderThan time.Duration) ([]ResolvedError, error) {
 		return nil, err
 	}
 
-	if len(resolved) == 0 {
-		return nil, tx.Commit()
-	}
-
-	// Mark them as resolved
+	// Mark ALL stale errors as resolved (not just notified ones).
 	_, err = tx.Exec(
 		`UPDATE errors SET resolved_at = ? WHERE resolved_at IS NULL AND last_seen < ?`,
 		now, cutoff,
@@ -300,7 +318,7 @@ func (s *Store) AutoResolve(olderThan time.Duration) ([]ResolvedError, error) {
 
 // GCOccurrences deletes occurrence rows older than the given threshold.
 func (s *Store) GCOccurrences(before time.Time) (int64, error) {
-	res, err := s.DB.Exec("DELETE FROM occurrences WHERE timestamp < ?", before.Format(time.RFC3339))
+	res, err := s.db.Exec("DELETE FROM occurrences WHERE timestamp < ?", before.Format(time.RFC3339))
 	if err != nil {
 		return 0, err
 	}
@@ -322,7 +340,7 @@ func (s *Store) Silence(fp string, expiresAt *time.Time, reason string) error {
 	if expiresAt != nil {
 		exp = expiresAt.UTC().Format(time.RFC3339)
 	}
-	_, err := s.DB.Exec(
+	_, err := s.db.Exec(
 		`INSERT INTO silences (fingerprint, created_at, expires_at, reason) VALUES (?, ?, ?, ?)`,
 		fp, now, exp, reason,
 	)
@@ -331,14 +349,14 @@ func (s *Store) Silence(fp string, expiresAt *time.Time, reason string) error {
 
 // Unsilence removes all silences for a fingerprint.
 func (s *Store) Unsilence(fp string) error {
-	_, err := s.DB.Exec(`DELETE FROM silences WHERE fingerprint = ?`, fp)
+	_, err := s.db.Exec(`DELETE FROM silences WHERE fingerprint = ?`, fp)
 	return err
 }
 
 // ListSilences returns all active (non-expired) silences.
 func (s *Store) ListSilences() ([]SilenceEntry, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
-	rows, err := s.DB.Query(
+	rows, err := s.db.Query(
 		`SELECT fingerprint, created_at, COALESCE(expires_at, ''), COALESCE(reason, '')
 		 FROM silences
 		 WHERE expires_at IS NULL OR expires_at > ?`, now,
@@ -366,7 +384,7 @@ func (s *Store) ListSilences() ([]SilenceEntry, error) {
 func (s *Store) IsSilenced(fp string) bool {
 	now := time.Now().UTC().Format(time.RFC3339)
 	var count int
-	err := s.DB.QueryRow(
+	err := s.db.QueryRow(
 		`SELECT COUNT(*) FROM silences WHERE fingerprint = ? AND (expires_at IS NULL OR expires_at > ?)`,
 		fp, now,
 	).Scan(&count)
@@ -376,7 +394,7 @@ func (s *Store) IsSilenced(fp string) bool {
 // PruneExpiredSilences removes silences that have passed their expiry time.
 func (s *Store) PruneExpiredSilences() (int64, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
-	res, err := s.DB.Exec(`DELETE FROM silences WHERE expires_at IS NOT NULL AND expires_at < ?`, now)
+	res, err := s.db.Exec(`DELETE FROM silences WHERE expires_at IS NOT NULL AND expires_at < ?`, now)
 	if err != nil {
 		return 0, err
 	}
@@ -395,7 +413,7 @@ type ResolveResult struct {
 func (s *Store) Resolve(fpPrefix string) (ResolveResult, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	tx, err := s.DB.Begin()
+	tx, err := s.db.Begin()
 	if err != nil {
 		return ResolveResult{}, err
 	}
@@ -403,7 +421,7 @@ func (s *Store) Resolve(fpPrefix string) (ResolveResult, error) {
 
 	// Collect details before resolving
 	rows, err := tx.Query(
-		`SELECT fingerprint, type, value FROM errors WHERE fingerprint LIKE ?||'%' AND resolved_at IS NULL`,
+		`SELECT fingerprint, type, value, level, count, first_seen, last_seen FROM errors WHERE fingerprint LIKE ?||'%' AND resolved_at IS NULL`,
 		fpPrefix,
 	)
 	if err != nil {
@@ -412,7 +430,7 @@ func (s *Store) Resolve(fpPrefix string) (ResolveResult, error) {
 	var resolved []ResolvedError
 	for rows.Next() {
 		var r ResolvedError
-		if err := rows.Scan(&r.Fingerprint, &r.Type, &r.Value); err != nil {
+		if err := rows.Scan(&r.Fingerprint, &r.Type, &r.Value, &r.Level, &r.Count, &r.FirstSeen, &r.LastSeen); err != nil {
 			rows.Close()
 			return ResolveResult{}, err
 		}
@@ -462,7 +480,7 @@ type TagDist struct {
 // GetTagDistribution returns the distribution of tag values across occurrences
 // for the given fingerprint.
 func (s *Store) GetTagDistribution(fp string) map[string]TagDist {
-	rows, err := s.DB.Query(`SELECT tags FROM occurrences WHERE fingerprint = ? AND tags != '' AND tags IS NOT NULL`, fp)
+	rows, err := s.db.Query(`SELECT tags FROM occurrences WHERE fingerprint = ? AND tags != '' AND tags IS NOT NULL`, fp)
 	if err != nil {
 		return nil
 	}
@@ -514,7 +532,7 @@ func (s *Store) GetTagDistribution(fp string) map[string]TagDist {
 // FindByPrefix resolves a fingerprint prefix to the full fingerprint.
 func (s *Store) FindByPrefix(prefix string) (string, error) {
 	var fullFP string
-	err := s.DB.QueryRow("SELECT fingerprint FROM errors WHERE fingerprint LIKE ?||'%' LIMIT 1", prefix).Scan(&fullFP)
+	err := s.db.QueryRow("SELECT fingerprint FROM errors WHERE fingerprint LIKE ?||'%' LIMIT 1", prefix).Scan(&fullFP)
 	if err != nil {
 		return "", fmt.Errorf("not found: %s", prefix)
 	}

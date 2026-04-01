@@ -1,13 +1,11 @@
 package cli
 
 import (
-	"database/sql"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/PhilHem/drillip/domain"
@@ -15,10 +13,9 @@ import (
 	"github.com/PhilHem/drillip/store"
 )
 
-// CLI holds the database connection for CLI commands.
+// CLI holds the store connection for CLI commands.
 type CLI struct {
-	DB    *sql.DB
-	Store *store.Store // needed for silence operations
+	Store *store.Store
 }
 
 func (c *CLI) RunTop(args []string, w io.Writer) {
@@ -28,53 +25,31 @@ func (c *CLI) RunTop(args []string, w io.Writer) {
 	tag := fs.String("tag", "", "filter by tag (key=value)")
 	_ = fs.Parse(args)
 
-	query := `SELECT fingerprint, count, type, value, level, last_seen, first_seen, COALESCE(resolved_at, '') FROM errors`
-	var conditions []string
-	var queryArgs []interface{}
-	if *level != "" {
-		conditions = append(conditions, `level = ?`)
-		queryArgs = append(queryArgs, *level)
-	}
+	f := store.ListFilter{Level: *level}
 	if *tag != "" {
 		if k, v, ok := domain.ParseTag(*tag); ok {
-			conditions = append(conditions, `json_extract(tags, '$.'||?) = ?`)
-			queryArgs = append(queryArgs, k, v)
+			f.TagKey = k
+			f.TagVal = v
 		}
 	}
-	if len(conditions) > 0 {
-		query += ` WHERE ` + strings.Join(conditions, ` AND `)
-	}
-	query += ` ORDER BY count DESC LIMIT ?`
-	queryArgs = append(queryArgs, *limit)
 
-	rows, err := c.DB.Query(query, queryArgs...)
+	summaries, err := c.Store.ListTop(f, *limit)
 	if err != nil {
 		fmt.Fprintf(w, "error: %v\n", err)
 		return
 	}
-	defer rows.Close()
 
-	var tableRows [][]string
-	for rows.Next() {
-		var fp, typ, val, lvl, lastSeen, firstSeen, resolvedAt string
-		var count int
-		if err := rows.Scan(&fp, &count, &typ, &val, &lvl, &lastSeen, &firstSeen, &resolvedAt); err != nil {
-			continue
-		}
-		t, _ := time.Parse(time.RFC3339, lastSeen)
-		state := domain.DeriveState(resolvedAt, firstSeen)
-		tableRows = append(tableRows, []string{
-			fp[:8], fmt.Sprintf("%d", count), lvl, state, typ, truncate(val, 50), timeAgo(t),
-		})
-	}
-	if err := rows.Err(); err != nil {
-		fmt.Fprintf(w, "error: %v\n", err)
-		return
-	}
-
-	if len(tableRows) == 0 {
+	if len(summaries) == 0 {
 		fmt.Fprintln(w, "no errors recorded")
 		return
+	}
+
+	var tableRows [][]string
+	for _, e := range summaries {
+		t, _ := time.Parse(time.RFC3339, e.LastSeen)
+		tableRows = append(tableRows, []string{
+			e.Fingerprint[:8], fmt.Sprintf("%d", e.Count), e.Level, e.State, e.Type, truncate(e.Value, 50), timeAgo(t),
+		})
 	}
 
 	printTable(w, []string{"FINGERPRINT", "COUNT", "LEVEL", "STATE", "TYPE", "VALUE", "LAST SEEN"}, tableRows)
@@ -88,50 +63,33 @@ func (c *CLI) RunRecent(args []string, w io.Writer) {
 	tag := fs.String("tag", "", "filter by tag (key=value)")
 	_ = fs.Parse(args)
 
-	since := time.Now().UTC().Add(-time.Duration(*hours) * time.Hour).Format(time.RFC3339)
+	since := time.Now().UTC().Add(-time.Duration(*hours) * time.Hour)
 
-	query := `SELECT fingerprint, count, type, value, level, first_seen, COALESCE(resolved_at, '') FROM errors WHERE first_seen > ?`
-	queryArgs := []interface{}{since}
-	if *level != "" {
-		query += ` AND level = ?`
-		queryArgs = append(queryArgs, *level)
-	}
+	f := store.ListFilter{Level: *level}
 	if *tag != "" {
 		if k, v, ok := domain.ParseTag(*tag); ok {
-			query += ` AND json_extract(tags, '$.'||?) = ?`
-			queryArgs = append(queryArgs, k, v)
+			f.TagKey = k
+			f.TagVal = v
 		}
 	}
-	query += ` ORDER BY first_seen DESC`
 
-	rows, err := c.DB.Query(query, queryArgs...)
+	summaries, err := c.Store.ListRecent(f, since)
 	if err != nil {
 		fmt.Fprintf(w, "error: %v\n", err)
 		return
 	}
-	defer rows.Close()
 
-	var tableRows [][]string
-	for rows.Next() {
-		var fp, typ, val, lvl, firstSeen, resolvedAt string
-		var count int
-		if err := rows.Scan(&fp, &count, &typ, &val, &lvl, &firstSeen, &resolvedAt); err != nil {
-			continue
-		}
-		t, _ := time.Parse(time.RFC3339, firstSeen)
-		state := domain.DeriveState(resolvedAt, firstSeen)
-		tableRows = append(tableRows, []string{
-			fp[:8], fmt.Sprintf("%d", count), lvl, state, typ, truncate(val, 50), timeAgo(t),
-		})
-	}
-	if err := rows.Err(); err != nil {
-		fmt.Fprintf(w, "error: %v\n", err)
-		return
-	}
-
-	if len(tableRows) == 0 {
+	if len(summaries) == 0 {
 		fmt.Fprintf(w, "no new errors in the last %d hour(s)\n", *hours)
 		return
+	}
+
+	var tableRows [][]string
+	for _, e := range summaries {
+		t, _ := time.Parse(time.RFC3339, e.FirstSeen)
+		tableRows = append(tableRows, []string{
+			e.Fingerprint[:8], fmt.Sprintf("%d", e.Count), e.Level, e.State, e.Type, truncate(e.Value, 50), timeAgo(t),
+		})
 	}
 
 	fmt.Fprintf(w, "New errors (last %dh):\n\n", *hours)
@@ -156,70 +114,61 @@ func (c *CLI) RunShow(args []string, w io.Writer) {
 		return
 	}
 
-	var typ, val, lvl, stacktrace, breadcrumbs, release, env, userCtx, tags, platform, firstSeen, lastSeen string
-	var count int
-	err = c.DB.QueryRow(`
-		SELECT type, value, level, stacktrace, breadcrumbs,
-			release_tag, environment, user_context, tags, platform,
-			first_seen, last_seen, count
-		FROM errors WHERE fingerprint = ?
-	`, fullFP).Scan(&typ, &val, &lvl, &stacktrace, &breadcrumbs,
-		&release, &env, &userCtx, &tags, &platform,
-		&firstSeen, &lastSeen, &count)
+	d, err := c.Store.GetDetail(fullFP)
 	if err != nil {
 		fmt.Fprintf(w, "error not found: %s\n", fp)
 		return
 	}
 
-	first, _ := time.Parse(time.RFC3339, firstSeen)
-	last, _ := time.Parse(time.RFC3339, lastSeen)
+	first, _ := time.Parse(time.RFC3339, d.FirstSeen)
+	last, _ := time.Parse(time.RFC3339, d.LastSeen)
 
 	printSection(w, "Error")
 	fmt.Fprintf(w, "Fingerprint: %s\n", fullFP)
-	fmt.Fprintf(w, "Level:       %s\n", lvl)
-	fmt.Fprintf(w, "Type:        %s\n", typ)
-	fmt.Fprintf(w, "Value:       %s\n", val)
-	fmt.Fprintf(w, "Count:       %d\n", count)
-	fmt.Fprintf(w, "First seen:  %s (%s)\n", firstSeen, timeAgo(first))
-	fmt.Fprintf(w, "Last seen:   %s (%s)\n", lastSeen, timeAgo(last))
-	if release != "" {
-		fmt.Fprintf(w, "Release:     %s\n", release)
+	fmt.Fprintf(w, "Level:       %s\n", d.Level)
+	fmt.Fprintf(w, "Type:        %s\n", d.Type)
+	fmt.Fprintf(w, "Value:       %s\n", d.Value)
+	fmt.Fprintf(w, "Count:       %d\n", d.Count)
+	fmt.Fprintf(w, "First seen:  %s (%s)\n", d.FirstSeen, timeAgo(first))
+	fmt.Fprintf(w, "Last seen:   %s (%s)\n", d.LastSeen, timeAgo(last))
+	if d.Release != "" {
+		fmt.Fprintf(w, "Release:     %s\n", d.Release)
 	}
-	if env != "" {
-		fmt.Fprintf(w, "Environment: %s\n", env)
+	if d.Environment != "" {
+		fmt.Fprintf(w, "Environment: %s\n", d.Environment)
 	}
-	if platform != "" {
-		fmt.Fprintf(w, "Platform:    %s\n", platform)
+	if d.Platform != "" {
+		fmt.Fprintf(w, "Platform:    %s\n", d.Platform)
 	}
 
-	if stacktrace != "" {
+	if d.Stacktrace != "" {
 		fmt.Fprintln(w)
 		printSection(w, "Stacktrace")
-		printStacktrace(w, stacktrace)
+		printStacktrace(w, d.Stacktrace)
 	}
 
-	if breadcrumbs != "" {
+	if d.Breadcrumbs != "" {
 		fmt.Fprintln(w)
 		printSection(w, "Breadcrumbs")
-		printBreadcrumbs(w, breadcrumbs)
+		printBreadcrumbs(w, d.Breadcrumbs)
 	}
 
-	if userCtx != "" && userCtx != "null" {
+	if d.UserContext != "" && d.UserContext != "null" {
 		fmt.Fprintln(w)
 		printSection(w, "User")
 		var user map[string]interface{}
-		if json.Unmarshal([]byte(userCtx), &user) == nil {
+		if json.Unmarshal([]byte(d.UserContext), &user) == nil {
 			for k, v := range user {
 				fmt.Fprintf(w, "  %s: %v\n", k, v)
 			}
 		}
 	}
 
-	if tags != "" && tags != "null" {
+	if d.Tags != "" && d.Tags != "null" {
 		fmt.Fprintln(w)
 		printSection(w, "Tags")
 		var tagMap map[string]string
-		if json.Unmarshal([]byte(tags), &tagMap) == nil {
+		if json.Unmarshal([]byte(d.Tags), &tagMap) == nil {
 			for k, v := range tagMap {
 				fmt.Fprintf(w, "  %s: %s\n", k, v)
 			}
@@ -227,7 +176,7 @@ func (c *CLI) RunShow(args []string, w io.Writer) {
 	}
 
 	// Tag distribution from occurrences
-	printTagDistribution(w, c.Store.GetTagDistribution(fullFP))
+	printTagDistribution(w, d.TagDist)
 
 	printHint(w, "drillip trend "+fullFP[:8], "drillip correlate "+fullFP[:8],
 		"drillip top --tag key=value")
@@ -282,36 +231,9 @@ func (c *CLI) RunTrend(args []string, w io.Writer) {
 	}
 
 	// Query occurrences grouped by hour for last 24h
-	since := time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339)
-	rows, err := c.DB.Query(`
-		SELECT strftime('%Y-%m-%d %H:00', timestamp) AS hour, COUNT(*) AS cnt
-		FROM occurrences
-		WHERE fingerprint = ? AND timestamp > ?
-		GROUP BY hour ORDER BY hour
-	`, fullFP, since)
+	since := time.Now().UTC().Add(-24 * time.Hour)
+	buckets, err := c.Store.GetTrend(fullFP, since)
 	if err != nil {
-		fmt.Fprintf(w, "error: %v\n", err)
-		return
-	}
-	defer rows.Close()
-
-	type bucket struct {
-		hour  string
-		count int
-	}
-	var buckets []bucket
-	maxCount := 0
-	for rows.Next() {
-		var b bucket
-		if err := rows.Scan(&b.hour, &b.count); err != nil {
-			continue
-		}
-		if b.count > maxCount {
-			maxCount = b.count
-		}
-		buckets = append(buckets, b)
-	}
-	if err := rows.Err(); err != nil {
 		fmt.Fprintf(w, "error: %v\n", err)
 		return
 	}
@@ -321,11 +243,18 @@ func (c *CLI) RunTrend(args []string, w io.Writer) {
 		return
 	}
 
+	maxCount := 0
+	for _, b := range buckets {
+		if b.Count > maxCount {
+			maxCount = b.Count
+		}
+	}
+
 	fmt.Fprintf(w, "Trend (last 24h) for %s:\n\n", fullFP[:8])
 	for _, b := range buckets {
 		// Show just the hour part
-		label := b.hour[11:16]
-		printBar(w, label, b.count, maxCount, 30)
+		label := b.Hour[11:16]
+		printBar(w, label, b.Count, maxCount, 30)
 	}
 
 	printHint(w, "drillip correlate "+fullFP[:8])
@@ -359,11 +288,7 @@ func (c *CLI) RunCorrelate(args []string, w io.Writer, cfg integrations.Config) 
 	}
 
 	// Fetch error row
-	var typ, val, stacktrace, breadcrumbs, userCtx string
-	err = c.DB.QueryRow(`
-		SELECT type, value, stacktrace, breadcrumbs, user_context
-		FROM errors WHERE fingerprint = ?
-	`, fullFP).Scan(&typ, &val, &stacktrace, &breadcrumbs, &userCtx)
+	cd, err := c.Store.GetCorrelateData(fullFP)
 	if err != nil {
 		fmt.Fprintf(w, "error not found: %s\n", fp)
 		return
@@ -371,31 +296,28 @@ func (c *CLI) RunCorrelate(args []string, w io.Writer, cfg integrations.Config) 
 
 	// Fetch Nth most recent occurrence
 	var occTimestamp, occTraceID string
-	err = c.DB.QueryRow(`
-		SELECT timestamp, COALESCE(trace_id, '')
-		FROM occurrences WHERE fingerprint = ?
-		ORDER BY timestamp DESC LIMIT 1 OFFSET ?
-	`, fullFP, *nth-1).Scan(&occTimestamp, &occTraceID)
-
 	var occTime time.Time
-	if err == nil {
+	occ, occErr := c.Store.GetNthOccurrence(fullFP, *nth)
+	if occErr == nil {
+		occTimestamp = occ.Timestamp
+		occTraceID = occ.TraceID
 		occTime, _ = time.Parse(time.RFC3339, occTimestamp)
 	}
 
 	// Header
 	printSection(w, "Error")
-	fmt.Fprintf(w, "Type:        %s\n", typ)
-	fmt.Fprintf(w, "Value:       %s\n", val)
+	fmt.Fprintf(w, "Type:        %s\n", cd.Type)
+	fmt.Fprintf(w, "Value:       %s\n", cd.Value)
 	fmt.Fprintf(w, "Fingerprint: %s\n", fullFP)
 	if !occTime.IsZero() {
 		fmt.Fprintf(w, "Occurrence:  #%d at %s (%s)\n", *nth, occTimestamp, timeAgo(occTime))
 	}
 
 	// Stacktrace (always)
-	if stacktrace != "" {
+	if cd.Stacktrace != "" {
 		fmt.Fprintln(w)
 		printSection(w, "Stacktrace")
-		printStacktrace(w, stacktrace)
+		printStacktrace(w, cd.Stacktrace)
 	}
 
 	// Logs — if unit configured
@@ -415,10 +337,10 @@ func (c *CLI) RunCorrelate(args []string, w io.Writer, cfg integrations.Config) 
 	}
 
 	// Breadcrumbs (always)
-	if breadcrumbs != "" {
+	if cd.Breadcrumbs != "" {
 		fmt.Fprintln(w)
 		printSection(w, "Breadcrumbs")
-		printBreadcrumbs(w, breadcrumbs)
+		printBreadcrumbs(w, cd.Breadcrumbs)
 	}
 
 	// Trace — if VT configured and occurrence has trace_id
@@ -471,10 +393,10 @@ func (c *CLI) RunCorrelate(args []string, w io.Writer, cfg integrations.Config) 
 	}
 
 	// User (always)
-	if userCtx != "" && userCtx != "null" {
+	if cd.UserContext != "" && cd.UserContext != "null" {
 		fmt.Fprintln(w)
 		printSection(w, "User")
-		fmt.Fprintf(w, "  %s\n", userCtx)
+		fmt.Fprintf(w, "  %s\n", cd.UserContext)
 	}
 
 	// Next hints
@@ -499,37 +421,26 @@ func (c *CLI) RunReleases(args []string, w io.Writer) {
 		return
 	}
 
-	rows, err := c.DB.Query(`
-		SELECT COALESCE(release_tag, '(none)'), COUNT(*),
-			MIN(timestamp), MAX(timestamp)
-		FROM occurrences WHERE fingerprint = ?
-		GROUP BY release_tag ORDER BY COUNT(*) DESC
-	`, fullFP)
+	releases, err := c.Store.GetReleases(fullFP)
 	if err != nil {
 		fmt.Fprintf(w, "error: %v\n", err)
 		return
 	}
-	defer rows.Close()
 
-	var tableRows [][]string
-	for rows.Next() {
-		var release, firstSeen, lastSeen string
-		var count int
-		if err := rows.Scan(&release, &count, &firstSeen, &lastSeen); err != nil {
-			continue
-		}
-		tableRows = append(tableRows, []string{
-			release, fmt.Sprintf("%d", count), firstSeen, lastSeen,
-		})
-	}
-	if err := rows.Err(); err != nil {
-		fmt.Fprintf(w, "error: %v\n", err)
-		return
-	}
-
-	if len(tableRows) == 0 {
+	if len(releases) == 0 {
 		fmt.Fprintf(w, "no occurrences for %s\n", fullFP[:8])
 		return
+	}
+
+	var tableRows [][]string
+	for _, r := range releases {
+		release := r.Release
+		if release == "" {
+			release = "(none)"
+		}
+		tableRows = append(tableRows, []string{
+			release, fmt.Sprintf("%d", r.Count), r.FirstSeen, r.LastSeen,
+		})
 	}
 
 	fmt.Fprintf(w, "Releases for %s:\n\n", fullFP[:8])
@@ -537,28 +448,19 @@ func (c *CLI) RunReleases(args []string, w io.Writer) {
 }
 
 func (c *CLI) RunStats(_ []string, w io.Writer) {
-	var uniqueCount, totalOccurrences int
-	var minTime, maxTime string
-
-	if err := c.DB.QueryRow("SELECT COUNT(*) FROM errors").Scan(&uniqueCount); err != nil {
-		fmt.Fprintf(w, "error: %v\n", err)
-		return
-	}
-	if err := c.DB.QueryRow("SELECT COUNT(*) FROM occurrences").Scan(&totalOccurrences); err != nil {
+	st, err := c.Store.GetStats()
+	if err != nil {
 		fmt.Fprintf(w, "error: %v\n", err)
 		return
 	}
 
-	_ = c.DB.QueryRow("SELECT MIN(first_seen) FROM errors").Scan(&minTime)
-	_ = c.DB.QueryRow("SELECT MAX(last_seen) FROM errors").Scan(&maxTime)
-
-	fmt.Fprintf(w, "Unique errors:      %d\n", uniqueCount)
-	fmt.Fprintf(w, "Total occurrences:  %d\n", totalOccurrences)
-	if minTime != "" {
-		fmt.Fprintf(w, "First seen:         %s\n", minTime)
+	fmt.Fprintf(w, "Unique errors:      %d\n", st.UniqueErrors)
+	fmt.Fprintf(w, "Total occurrences:  %d\n", st.TotalOccurrences)
+	if st.FirstSeen != "" {
+		fmt.Fprintf(w, "First seen:         %s\n", st.FirstSeen)
 	}
-	if maxTime != "" {
-		fmt.Fprintf(w, "Last seen:          %s\n", maxTime)
+	if st.LastSeen != "" {
+		fmt.Fprintf(w, "Last seen:          %s\n", st.LastSeen)
 	}
 
 	printHint(w, "drillip top")
@@ -576,14 +478,11 @@ func (c *CLI) RunGC(args []string, w io.Writer) {
 		return
 	}
 
-	threshold := time.Now().UTC().Add(-dur).Format(time.RFC3339)
-
-	res, err := c.DB.Exec("DELETE FROM occurrences WHERE timestamp < ?", threshold)
+	deleted, err := c.Store.GCOccurrences(time.Now().UTC().Add(-dur))
 	if err != nil {
 		fmt.Fprintf(w, "error: %v\n", err)
 		return
 	}
-	deleted, _ := res.RowsAffected()
 	fmt.Fprintf(w, "deleted %d occurrences older than %s\n", deleted, args[0])
 }
 

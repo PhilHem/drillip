@@ -23,7 +23,7 @@ func setupStore(t *testing.T) *store.Store {
 func insertTestError(t *testing.T, s *store.Store, fp, typ, val, release string) {
 	t.Helper()
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.DB.Exec(`
+	_, err := s.RawDB().Exec(`
 		INSERT INTO errors (fingerprint, type, value, level, stacktrace, breadcrumbs,
 			release_tag, environment, user_context, tags, platform, first_seen, last_seen, count)
 		VALUES (?, ?, ?, 'error', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
@@ -44,7 +44,7 @@ func insertTestError(t *testing.T, s *store.Store, fp, typ, val, release string)
 
 func insertTestOccurrence(t *testing.T, s *store.Store, fp, release, traceID string, ts time.Time) {
 	t.Helper()
-	_, err := s.DB.Exec(`INSERT INTO occurrences (fingerprint, timestamp, release_tag, trace_id) VALUES (?,?,?,?)`,
+	_, err := s.RawDB().Exec(`INSERT INTO occurrences (fingerprint, timestamp, release_tag, trace_id) VALUES (?,?,?,?)`,
 		fp, ts.Format(time.RFC3339), release, traceID)
 	if err != nil {
 		t.Fatalf("insert occurrence: %v", err)
@@ -54,7 +54,7 @@ func insertTestOccurrence(t *testing.T, s *store.Store, fp, release, traceID str
 func insertTestErrorWithTags(t *testing.T, s *store.Store, fp, typ, val, release, tagsJSON string) {
 	t.Helper()
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.DB.Exec(`
+	_, err := s.RawDB().Exec(`
 		INSERT INTO errors (fingerprint, type, value, level, stacktrace, breadcrumbs,
 			release_tag, environment, user_context, tags, platform, first_seen, last_seen, count)
 		VALUES (?, ?, ?, 'error', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
@@ -75,7 +75,7 @@ func insertTestErrorWithTags(t *testing.T, s *store.Store, fp, typ, val, release
 
 func insertTestOccurrenceWithTags(t *testing.T, s *store.Store, fp, release, traceID, tagsJSON string, ts time.Time) {
 	t.Helper()
-	_, err := s.DB.Exec(`INSERT INTO occurrences (fingerprint, timestamp, release_tag, trace_id, tags) VALUES (?,?,?,?,?)`,
+	_, err := s.RawDB().Exec(`INSERT INTO occurrences (fingerprint, timestamp, release_tag, trace_id, tags) VALUES (?,?,?,?,?)`,
 		fp, ts.Format(time.RFC3339), release, traceID, tagsJSON)
 	if err != nil {
 		t.Fatalf("insert occurrence: %v", err)
@@ -86,7 +86,7 @@ func insertTestOccurrenceWithTags(t *testing.T, s *store.Store, fp, release, tra
 
 func TestRunStats(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 	insertTestError(t, s, "aaaa111122223333", "TypeError", "null ref", "v1.0.0")
 	insertTestOccurrence(t, s, "aaaa111122223333", "v1.0.0", "", time.Now())
 
@@ -103,7 +103,7 @@ func TestRunStats(t *testing.T) {
 
 func TestRunStatsEmpty(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 	var buf bytes.Buffer
 	c.RunStats(nil, &buf)
 	if !strings.Contains(buf.String(), "0") {
@@ -115,7 +115,7 @@ func TestRunStatsEmpty(t *testing.T) {
 
 func TestRunTop(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 	insertTestError(t, s, "bbbb111122223333", "ValueError", "bad input", "v1.0.0")
 	insertTestError(t, s, "bbbb111122223333", "ValueError", "bad input", "v1.0.0") // increment
 	insertTestError(t, s, "cccc111122223333", "IOError", "file not found", "v1.0.0")
@@ -139,7 +139,7 @@ func TestRunTop(t *testing.T) {
 
 func TestRunTopEmpty(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 	var buf bytes.Buffer
 	c.RunTop(nil, &buf)
 	if !strings.Contains(buf.String(), "no errors") {
@@ -149,7 +149,7 @@ func TestRunTopEmpty(t *testing.T) {
 
 func TestRunTopLimit(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 	insertTestError(t, s, "dddd111122223333", "Err1", "e1", "v1")
 	insertTestError(t, s, "eeee111122223333", "Err2", "e2", "v1")
 	insertTestError(t, s, "ffff111122223333", "Err3", "e3", "v1")
@@ -174,7 +174,7 @@ func TestRunTopLimit(t *testing.T) {
 
 func TestRunRecent(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 	// Insert with current time — should appear in recent
 	insertTestError(t, s, "aaab111122223333", "RecentErr", "just happened", "v2.0.0")
 
@@ -188,7 +188,7 @@ func TestRunRecent(t *testing.T) {
 
 func TestRunRecentEmpty(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 	var buf bytes.Buffer
 	c.RunRecent(nil, &buf)
 	if !strings.Contains(buf.String(), "no new errors") {
@@ -200,7 +200,7 @@ func TestRunRecentEmpty(t *testing.T) {
 
 func TestRunShow(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 	insertTestError(t, s, "aaac111122223333", "ShowError", "show me", "v3.0.0")
 
 	var buf bytes.Buffer
@@ -225,7 +225,7 @@ func TestRunShow(t *testing.T) {
 
 func TestRunShowNotFound(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 	var buf bytes.Buffer
 	c.RunShow([]string{"0000000000000000"}, &buf)
 	if !strings.Contains(buf.String(), "not found") {
@@ -246,7 +246,7 @@ func TestRunShowNoArgs(t *testing.T) {
 
 func TestRunTrend(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 	fp := "aaad111122223333"
 	insertTestError(t, s, fp, "TrendErr", "trending", "v1.0.0")
 
@@ -266,7 +266,7 @@ func TestRunTrend(t *testing.T) {
 
 func TestRunTrendNotFound(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 	var buf bytes.Buffer
 	c.RunTrend([]string{"0000000000000000"}, &buf)
 	if !strings.Contains(buf.String(), "not found") {
@@ -278,7 +278,7 @@ func TestRunTrendNotFound(t *testing.T) {
 
 func TestRunReleases(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 	fp := "aaae111122223333"
 	insertTestError(t, s, fp, "RelErr", "release test", "v1.0.0")
 
@@ -299,7 +299,7 @@ func TestRunReleases(t *testing.T) {
 
 func TestRunGC(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 	fp := "aaaf111122223333"
 	insertTestError(t, s, fp, "GCErr", "old error", "v1.0.0")
 
@@ -319,7 +319,7 @@ func TestRunGC(t *testing.T) {
 
 	// Verify only 1 remaining
 	var count int
-	if err := s.DB.QueryRow("SELECT COUNT(*) FROM occurrences").Scan(&count); err != nil {
+	if err := s.RawDB().QueryRow("SELECT COUNT(*) FROM occurrences").Scan(&count); err != nil {
 		t.Fatalf("query: %v", err)
 	}
 	if count != 1 {
@@ -349,7 +349,7 @@ func TestRunCorrelateNoArgs(t *testing.T) {
 
 func TestRunCorrelateNoIntegrations(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 	fp := "cccc222233334444"
 	insertTestError(t, s, fp, "CorrelateErr", "correlate test", "v1.0.0")
 	insertTestOccurrence(t, s, fp, "v1.0.0", "", time.Now().UTC())
@@ -370,7 +370,7 @@ func TestRunCorrelateNoIntegrations(t *testing.T) {
 
 func TestRunCorrelateNotFound(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 	var buf bytes.Buffer
 	c.RunCorrelate([]string{"0000000000000000"}, &buf, integrations.Config{})
 	if !strings.Contains(buf.String(), "not found") {
@@ -382,7 +382,7 @@ func TestRunCorrelateNotFound(t *testing.T) {
 
 func TestRunTopWithTagFilter(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 	insertTestErrorWithTags(t, s, "aab0111122223333", "TagErr1", "on web-1", "v1.0.0", `{"server":"web-1"}`)
 	insertTestErrorWithTags(t, s, "aab1222233334444", "TagErr2", "on web-2", "v1.0.0", `{"server":"web-2"}`)
 
@@ -399,7 +399,7 @@ func TestRunTopWithTagFilter(t *testing.T) {
 
 func TestRunRecentWithTagFilter(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 	insertTestErrorWithTags(t, s, "aab2111122223333", "RecentTag1", "tagged recent", "v1.0.0", `{"endpoint":"/api/orders"}`)
 	insertTestErrorWithTags(t, s, "aab3222233334444", "RecentTag2", "other recent", "v1.0.0", `{"endpoint":"/api/users"}`)
 
@@ -418,7 +418,7 @@ func TestRunRecentWithTagFilter(t *testing.T) {
 
 func TestRunResolve(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 	fp := "aab4111122223333"
 	insertTestError(t, s, fp, "ResolveErr", "needs resolving", "v1.0.0")
 
@@ -431,7 +431,7 @@ func TestRunResolve(t *testing.T) {
 
 	// Verify resolved_at is set
 	var resolvedAt string
-	if err := s.DB.QueryRow("SELECT COALESCE(resolved_at, '') FROM errors WHERE fingerprint = ?", fp).Scan(&resolvedAt); err != nil {
+	if err := s.RawDB().QueryRow("SELECT COALESCE(resolved_at, '') FROM errors WHERE fingerprint = ?", fp).Scan(&resolvedAt); err != nil {
 		t.Fatalf("query: %v", err)
 	}
 	if resolvedAt == "" {
@@ -441,7 +441,7 @@ func TestRunResolve(t *testing.T) {
 
 func TestRunResolveNotFound(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 
 	var buf bytes.Buffer
 	c.RunResolve([]string{"0000000000000000"}, &buf)
@@ -463,7 +463,7 @@ func TestRunResolveNoArgs(t *testing.T) {
 
 func TestRunTopShowsState(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 	insertTestError(t, s, "aab5111122223333", "StateErr", "state test", "v1.0.0")
 
 	var buf bytes.Buffer
@@ -478,7 +478,7 @@ func TestRunTopShowsState(t *testing.T) {
 
 func TestRunSilence(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 
 	var buf bytes.Buffer
 	c.RunSilence([]string{"abc123"}, &buf)
@@ -494,7 +494,7 @@ func TestRunSilence(t *testing.T) {
 
 func TestRunSilenceWithDuration(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 
 	var buf bytes.Buffer
 	c.RunSilence([]string{"d0a123", "2h"}, &buf)
@@ -510,7 +510,7 @@ func TestRunSilenceWithDuration(t *testing.T) {
 
 func TestRunSilenceWithReason(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 
 	var buf bytes.Buffer
 	c.RunSilence([]string{"--reason", "maintenance", "a5b123"}, &buf)
@@ -533,7 +533,7 @@ func TestRunSilenceWithReason(t *testing.T) {
 
 func TestRunSilenceNoArgs(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 
 	var buf bytes.Buffer
 	c.RunSilence(nil, &buf)
@@ -544,7 +544,7 @@ func TestRunSilenceNoArgs(t *testing.T) {
 
 func TestRunSilences(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 
 	_ = s.Silence("a0e111", nil, "test reason")
 
@@ -561,7 +561,7 @@ func TestRunSilences(t *testing.T) {
 
 func TestRunSilencesEmpty(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 
 	var buf bytes.Buffer
 	c.RunSilences(nil, &buf)
@@ -572,7 +572,7 @@ func TestRunSilencesEmpty(t *testing.T) {
 
 func TestRunUnsilence(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 
 	_ = s.Silence("a0b0c123", nil, "")
 
@@ -589,7 +589,7 @@ func TestRunUnsilence(t *testing.T) {
 
 func TestRunUnsilenceNoArgs(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 
 	var buf bytes.Buffer
 	c.RunUnsilence(nil, &buf)
@@ -600,7 +600,7 @@ func TestRunUnsilenceNoArgs(t *testing.T) {
 
 func TestShowTagDistribution(t *testing.T) {
 	s := setupStore(t)
-	c := &CLI{DB: s.DB, Store: s}
+	c := &CLI{Store: s}
 	fp := "aab6111122223333"
 	insertTestErrorWithTags(t, s, fp, "DistErr", "distribution test", "v1.0.0", `{"server":"web-1"}`)
 

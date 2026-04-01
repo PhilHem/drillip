@@ -112,7 +112,7 @@ func TestCRLFInExceptionTypeDoesNotInjectHeaders(t *testing.T) {
 
 	// Verify the stored exception type was sanitized
 	var storedType string
-	err := s.DB.QueryRow("SELECT type FROM errors LIMIT 1").Scan(&storedType)
+	err := s.RawDB().QueryRow("SELECT type FROM errors LIMIT 1").Scan(&storedType)
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestOversizedFieldsSanitized(t *testing.T) {
 
 	// Verify stored value is truncated
 	var storedValue string
-	err := s.DB.QueryRow("SELECT value FROM errors LIMIT 1").Scan(&storedValue)
+	err := s.RawDB().QueryRow("SELECT value FROM errors LIMIT 1").Scan(&storedValue)
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestInvalidLevelNormalized(t *testing.T) {
 
 	// Invalid level should be normalized (Sanitize clears it, EffectiveLevel defaults)
 	var storedLevel string
-	err := s.DB.QueryRow("SELECT level FROM errors LIMIT 1").Scan(&storedLevel)
+	err := s.RawDB().QueryRow("SELECT level FROM errors LIMIT 1").Scan(&storedLevel)
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}

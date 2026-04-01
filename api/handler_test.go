@@ -36,7 +36,7 @@ func TestAPITop(t *testing.T) {
 		t.Fatalf("store: %v", err)
 	}
 
-	h := &Handler{DB: s.DB}
+	h := &Handler{Store: s}
 	req := httptest.NewRequest(http.MethodGet, "/api/0/top/", nil)
 	w := httptest.NewRecorder()
 	h.HandleTop(w, req)
@@ -73,7 +73,7 @@ func TestAPITopWithTagFilter(t *testing.T) {
 		t.Fatalf("store: %v", err)
 	}
 
-	h := &Handler{DB: s.DB}
+	h := &Handler{Store: s}
 	req := httptest.NewRequest(http.MethodGet, "/api/0/top/?tag=server%3Dweb-1", nil)
 	w := httptest.NewRecorder()
 	h.HandleTop(w, req)
@@ -99,7 +99,7 @@ func TestAPIShow(t *testing.T) {
 		t.Fatalf("store: %v", err)
 	}
 
-	h := &Handler{DB: s.DB, Store: s}
+	h := &Handler{Store: s}
 	req := httptest.NewRequest(http.MethodGet, "/api/0/show/"+result.Fingerprint[:8]+"/", nil)
 	w := httptest.NewRecorder()
 	h.HandleShow(w, req)
@@ -118,7 +118,7 @@ func TestAPIShow(t *testing.T) {
 
 func TestAPIShowNotFound(t *testing.T) {
 	s := setupStore(t)
-	h := &Handler{DB: s.DB, Store: s}
+	h := &Handler{Store: s}
 	req := httptest.NewRequest(http.MethodGet, "/api/0/show/aabb001122334455/", nil)
 	w := httptest.NewRecorder()
 	h.HandleShow(w, req)
@@ -138,7 +138,7 @@ func TestAPIStats(t *testing.T) {
 		t.Fatalf("store: %v", err)
 	}
 
-	h := &Handler{DB: s.DB}
+	h := &Handler{Store: s}
 	req := httptest.NewRequest(http.MethodGet, "/api/0/stats/", nil)
 	w := httptest.NewRecorder()
 	h.HandleStats(w, req)
@@ -169,7 +169,7 @@ func TestAPIRecent(t *testing.T) {
 		t.Fatalf("store: %v", err)
 	}
 
-	h := &Handler{DB: s.DB}
+	h := &Handler{Store: s}
 	req := httptest.NewRequest(http.MethodGet, "/api/0/recent/?hours=1", nil)
 	w := httptest.NewRecorder()
 	h.HandleRecent(w, req)
@@ -198,7 +198,7 @@ func TestAPITrend(t *testing.T) {
 		t.Fatalf("store: %v", err)
 	}
 
-	h := &Handler{DB: s.DB, Store: s}
+	h := &Handler{Store: s}
 	req := httptest.NewRequest(http.MethodGet, "/api/0/trend/"+sr.Fingerprint[:8]+"/", nil)
 	w := httptest.NewRecorder()
 	h.HandleTrend(w, req)
@@ -231,7 +231,7 @@ func TestAPIReleases(t *testing.T) {
 		t.Fatalf("store: %v", err)
 	}
 
-	h := &Handler{DB: s.DB, Store: s}
+	h := &Handler{Store: s}
 	req := httptest.NewRequest(http.MethodGet, "/api/0/releases/"+sr.Fingerprint[:8]+"/", nil)
 	w := httptest.NewRecorder()
 	h.HandleReleases(w, req)
@@ -264,7 +264,7 @@ func TestAPIGC(t *testing.T) {
 		t.Fatalf("store: %v", err)
 	}
 
-	h := &Handler{DB: s.DB}
+	h := &Handler{Store: s}
 
 	// GC with 0h should delete all occurrences
 	req := httptest.NewRequest(http.MethodPost, "/api/0/gc/?older_than=0h", nil)
@@ -291,7 +291,7 @@ func TestAPIGC(t *testing.T) {
 
 func TestAPIGCRequiresPost(t *testing.T) {
 	s := setupStore(t)
-	h := &Handler{DB: s.DB}
+	h := &Handler{Store: s}
 	req := httptest.NewRequest(http.MethodGet, "/api/0/gc/?older_than=7d", nil)
 	w := httptest.NewRecorder()
 	h.HandleGC(w, req)
@@ -312,7 +312,7 @@ func TestAPIResolve(t *testing.T) {
 		t.Fatalf("store: %v", err)
 	}
 
-	h := &Handler{DB: s.DB, Store: s}
+	h := &Handler{Store: s}
 	req := httptest.NewRequest(http.MethodPost, "/api/0/resolve/"+sr.Fingerprint[:8]+"/", nil)
 	w := httptest.NewRecorder()
 	h.HandleResolve(w, req)
@@ -335,7 +335,7 @@ func TestAPIResolve(t *testing.T) {
 
 func TestAPIResolveNotFound(t *testing.T) {
 	s := setupStore(t)
-	h := &Handler{DB: s.DB, Store: s}
+	h := &Handler{Store: s}
 	req := httptest.NewRequest(http.MethodPost, "/api/0/resolve/aabb001122334455/", nil)
 	w := httptest.NewRecorder()
 	h.HandleResolve(w, req)
@@ -346,7 +346,7 @@ func TestAPIResolveNotFound(t *testing.T) {
 
 func TestAPISilencePost(t *testing.T) {
 	s := setupStore(t)
-	h := &Handler{DB: s.DB, Store: s}
+	h := &Handler{Store: s}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/0/silence/abc123/?duration=24h&reason=maintenance", nil)
 	w := httptest.NewRecorder()
@@ -377,7 +377,7 @@ func TestAPISilencePost(t *testing.T) {
 
 func TestAPISilencePermanent(t *testing.T) {
 	s := setupStore(t)
-	h := &Handler{DB: s.DB, Store: s}
+	h := &Handler{Store: s}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/0/silence/aaa0001111/", nil)
 	w := httptest.NewRecorder()
@@ -394,7 +394,7 @@ func TestAPISilencePermanent(t *testing.T) {
 
 func TestAPIUnsilenceDelete(t *testing.T) {
 	s := setupStore(t)
-	h := &Handler{DB: s.DB, Store: s}
+	h := &Handler{Store: s}
 
 	// First silence it
 	_ = s.Silence("de1a23", nil, "")
@@ -414,7 +414,7 @@ func TestAPIUnsilenceDelete(t *testing.T) {
 
 func TestAPIListSilences(t *testing.T) {
 	s := setupStore(t)
-	h := &Handler{DB: s.DB, Store: s}
+	h := &Handler{Store: s}
 
 	_ = s.Silence("list1", nil, "reason1")
 
@@ -443,7 +443,7 @@ func TestAPIListSilences(t *testing.T) {
 
 func TestAPIListSilencesRequiresGet(t *testing.T) {
 	s := setupStore(t)
-	h := &Handler{DB: s.DB, Store: s}
+	h := &Handler{Store: s}
 	req := httptest.NewRequest(http.MethodPost, "/api/0/silences/", nil)
 	w := httptest.NewRecorder()
 	h.HandleListSilences(w, req)
@@ -454,7 +454,7 @@ func TestAPIListSilencesRequiresGet(t *testing.T) {
 
 func TestAPISilenceRequiresPostOrDelete(t *testing.T) {
 	s := setupStore(t)
-	h := &Handler{DB: s.DB, Store: s}
+	h := &Handler{Store: s}
 	req := httptest.NewRequest(http.MethodGet, "/api/0/silence/abc123/", nil)
 	w := httptest.NewRecorder()
 	h.HandleSilence(w, req)
@@ -465,7 +465,7 @@ func TestAPISilenceRequiresPostOrDelete(t *testing.T) {
 
 func TestAPIResolveRequiresPost(t *testing.T) {
 	s := setupStore(t)
-	h := &Handler{DB: s.DB, Store: s}
+	h := &Handler{Store: s}
 	req := httptest.NewRequest(http.MethodGet, "/api/0/resolve/abc/", nil)
 	w := httptest.NewRecorder()
 	h.HandleResolve(w, req)
@@ -485,7 +485,7 @@ func TestAPITopIncludesState(t *testing.T) {
 		t.Fatalf("store: %v", err)
 	}
 
-	h := &Handler{DB: s.DB}
+	h := &Handler{Store: s}
 	req := httptest.NewRequest(http.MethodGet, "/api/0/top/", nil)
 	w := httptest.NewRecorder()
 	h.HandleTop(w, req)
@@ -515,7 +515,7 @@ func TestAPIShowIncludesState(t *testing.T) {
 		t.Fatalf("store: %v", err)
 	}
 
-	h := &Handler{DB: s.DB, Store: s}
+	h := &Handler{Store: s}
 	req := httptest.NewRequest(http.MethodGet, "/api/0/show/"+sr.Fingerprint[:8]+"/", nil)
 	w := httptest.NewRecorder()
 	h.HandleShow(w, req)
@@ -546,7 +546,7 @@ func TestAPICorrelate(t *testing.T) {
 		t.Fatalf("store: %v", err)
 	}
 
-	h := &Handler{DB: s.DB, Store: s}
+	h := &Handler{Store: s}
 	req := httptest.NewRequest(http.MethodGet, "/api/0/correlate/"+sr.Fingerprint[:8]+"/", nil)
 	w := httptest.NewRecorder()
 	h.HandleCorrelate(w, req)
@@ -577,7 +577,7 @@ func TestAPICorrelate(t *testing.T) {
 
 func TestAPICorrelateNotFound(t *testing.T) {
 	s := setupStore(t)
-	h := &Handler{DB: s.DB, Store: s}
+	h := &Handler{Store: s}
 	req := httptest.NewRequest(http.MethodGet, "/api/0/correlate/abcdef01/", nil)
 	w := httptest.NewRecorder()
 	h.HandleCorrelate(w, req)
@@ -602,7 +602,7 @@ func TestAPICorrelateWithNth(t *testing.T) {
 		t.Fatalf("store: %v", err)
 	}
 
-	h := &Handler{DB: s.DB, Store: s}
+	h := &Handler{Store: s}
 	req := httptest.NewRequest(http.MethodGet, "/api/0/correlate/"+sr.Fingerprint[:8]+"/?nth=2", nil)
 	w := httptest.NewRecorder()
 	h.HandleCorrelate(w, req)

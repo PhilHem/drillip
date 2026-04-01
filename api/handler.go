@@ -1,7 +1,6 @@
 package api
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -18,7 +17,6 @@ import (
 
 // Handler serves the JSON API endpoints.
 type Handler struct {
-	DB           *sql.DB
 	Store        *store.Store
 	Integrations integrations.Config
 	Notifier     *notify.Notifier
@@ -68,47 +66,24 @@ func (h *Handler) HandleTop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := `SELECT fingerprint, count, type, value, level, last_seen, first_seen, COALESCE(resolved_at, '') FROM errors`
-	var conditions []string
-	var queryArgs []interface{}
-
-	if level := r.URL.Query().Get("level"); level != "" {
-		conditions = append(conditions, `level = ?`)
-		queryArgs = append(queryArgs, level)
-	}
+	var f store.ListFilter
+	f.Level = r.URL.Query().Get("level")
 	if tag := r.URL.Query().Get("tag"); tag != "" {
 		if k, v, ok := domain.ParseTag(tag); ok {
-			conditions = append(conditions, `json_extract(tags, '$.'||?) = ?`)
-			queryArgs = append(queryArgs, k, v)
+			f.TagKey, f.TagVal = k, v
 		}
 	}
-	if len(conditions) > 0 {
-		query += ` WHERE ` + strings.Join(conditions, ` AND `)
-	}
-	query += ` ORDER BY count DESC LIMIT 25`
 
-	rows, err := h.DB.Query(query, queryArgs...)
+	summaries, err := h.Store.ListTop(f, 25)
 	if err != nil {
+		slog.Error("HandleTop", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	defer rows.Close()
 
-	var results []apiError
-	for rows.Next() {
-		var e apiError
-		var firstSeen, resolvedAt string
-		if err := rows.Scan(&e.Fingerprint, &e.Count, &e.Type, &e.Value, &e.Level, &e.LastSeen, &firstSeen, &resolvedAt); err != nil {
-			continue
-		}
-		e.ResolvedAt = resolvedAt
-		e.State = domain.DeriveState(resolvedAt, firstSeen)
-		results = append(results, e)
-	}
-	if err := rows.Err(); err != nil {
-		slog.Error("HandleTop rows iteration", "err", err)
-		writeError(w, http.StatusInternalServerError, "internal error")
-		return
+	results := make([]apiError, len(summaries))
+	for i, s := range summaries {
+		results[i] = summaryToAPI(s)
 	}
 
 	writeJSON(w, results)
@@ -141,41 +116,13 @@ func (h *Handler) HandleShow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var d apiErrorDetail
-	var stacktrace, breadcrumbs, userCtx, tags, resolvedAt string
-	err = h.DB.QueryRow(`
-		SELECT type, value, level, stacktrace, breadcrumbs,
-			release_tag, environment, user_context, tags, platform,
-			first_seen, last_seen, count, COALESCE(resolved_at, '')
-		FROM errors WHERE fingerprint = ?
-	`, fullFP).Scan(&d.Type, &d.Value, &d.Level, &stacktrace, &breadcrumbs,
-		&d.Release, &d.Environment, &userCtx, &tags, &d.Platform,
-		&d.FirstSeen, &d.LastSeen, &d.Count, &resolvedAt)
+	detail, err := h.Store.GetDetail(fullFP)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	d.Fingerprint = fullFP
 
-	d.ResolvedAt = resolvedAt
-	d.State = domain.DeriveState(resolvedAt, d.FirstSeen)
-
-	if stacktrace != "" {
-		d.Stacktrace = json.RawMessage(stacktrace)
-	}
-	if breadcrumbs != "" {
-		d.Breadcrumbs = json.RawMessage(breadcrumbs)
-	}
-	if userCtx != "" && userCtx != "null" {
-		d.User = json.RawMessage(userCtx)
-	}
-	if tags != "" && tags != "null" {
-		d.Tags = json.RawMessage(tags)
-	}
-
-	d.TagDist = h.Store.GetTagDistribution(d.Fingerprint)
-
-	writeJSON(w, d)
+	writeJSON(w, detailToAPI(detail))
 }
 
 func (h *Handler) HandleStats(w http.ResponseWriter, r *http.Request) {
@@ -184,13 +131,19 @@ func (h *Handler) HandleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var s apiStats
-	_ = h.DB.QueryRow("SELECT COUNT(*) FROM errors").Scan(&s.UniqueErrors)
-	_ = h.DB.QueryRow("SELECT COUNT(*) FROM occurrences").Scan(&s.TotalOccurrences)
-	_ = h.DB.QueryRow("SELECT MIN(first_seen) FROM errors").Scan(&s.FirstSeen)
-	_ = h.DB.QueryRow("SELECT MAX(last_seen) FROM errors").Scan(&s.LastSeen)
+	stats, err := h.Store.GetStats()
+	if err != nil {
+		slog.Error("HandleStats", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
 
-	writeJSON(w, s)
+	writeJSON(w, apiStats{
+		UniqueErrors:     stats.UniqueErrors,
+		TotalOccurrences: stats.TotalOccurrences,
+		FirstSeen:        stats.FirstSeen,
+		LastSeen:         stats.LastSeen,
+	})
 }
 
 func (h *Handler) HandleRecent(w http.ResponseWriter, r *http.Request) {
@@ -209,44 +162,26 @@ func (h *Handler) HandleRecent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	since := time.Now().UTC().Add(-time.Duration(hours) * time.Hour).Format(time.RFC3339)
+	since := time.Now().UTC().Add(-time.Duration(hours) * time.Hour)
 
-	query := `SELECT fingerprint, count, type, value, level, first_seen, COALESCE(resolved_at, '') FROM errors WHERE first_seen > ?`
-	queryArgs := []interface{}{since}
-	if level := r.URL.Query().Get("level"); level != "" {
-		query += ` AND level = ?`
-		queryArgs = append(queryArgs, level)
-	}
+	var f store.ListFilter
+	f.Level = r.URL.Query().Get("level")
 	if tag := r.URL.Query().Get("tag"); tag != "" {
 		if k, v, ok := domain.ParseTag(tag); ok {
-			query += ` AND json_extract(tags, '$.'||?) = ?`
-			queryArgs = append(queryArgs, k, v)
+			f.TagKey, f.TagVal = k, v
 		}
 	}
-	query += ` ORDER BY first_seen DESC`
 
-	rows, err := h.DB.Query(query, queryArgs...)
+	summaries, err := h.Store.ListRecent(f, since)
 	if err != nil {
+		slog.Error("HandleRecent", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	defer rows.Close()
 
-	var results []apiError
-	for rows.Next() {
-		var e apiError
-		var resolvedAt string
-		if err := rows.Scan(&e.Fingerprint, &e.Count, &e.Type, &e.Value, &e.Level, &e.LastSeen, &resolvedAt); err != nil {
-			continue
-		}
-		e.ResolvedAt = resolvedAt
-		e.State = domain.DeriveState(resolvedAt, e.LastSeen)
-		results = append(results, e)
-	}
-	if err := rows.Err(); err != nil {
-		slog.Error("HandleRecent rows iteration", "err", err)
-		writeError(w, http.StatusInternalServerError, "internal error")
-		return
+	results := make([]apiError, len(summaries))
+	for i, s := range summaries {
+		results[i] = summaryToAPI(s)
 	}
 
 	writeJSON(w, results)
@@ -275,31 +210,17 @@ func (h *Handler) HandleTrend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	since := time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339)
-	rows, err := h.DB.Query(`
-		SELECT strftime('%Y-%m-%d %H:00', timestamp) AS hour, COUNT(*) AS cnt
-		FROM occurrences
-		WHERE fingerprint = ? AND timestamp > ?
-		GROUP BY hour ORDER BY hour
-	`, fullFP, since)
+	since := time.Now().UTC().Add(-24 * time.Hour)
+	trendBuckets, err := h.Store.GetTrend(fullFP, since)
 	if err != nil {
+		slog.Error("HandleTrend", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	defer rows.Close()
 
-	var buckets []apiBucket
-	for rows.Next() {
-		var b apiBucket
-		if err := rows.Scan(&b.Hour, &b.Count); err != nil {
-			continue
-		}
-		buckets = append(buckets, b)
-	}
-	if err := rows.Err(); err != nil {
-		slog.Error("HandleTrend rows iteration", "err", err)
-		writeError(w, http.StatusInternalServerError, "internal error")
-		return
+	buckets := make([]apiBucket, len(trendBuckets))
+	for i, b := range trendBuckets {
+		buckets[i] = apiBucket{Hour: b.Hour, Count: b.Count}
 	}
 
 	writeJSON(w, map[string]interface{}{
@@ -333,30 +254,21 @@ func (h *Handler) HandleReleases(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := h.DB.Query(`
-		SELECT COALESCE(release_tag, ''), COUNT(*),
-			MIN(timestamp), MAX(timestamp)
-		FROM occurrences WHERE fingerprint = ?
-		GROUP BY release_tag ORDER BY COUNT(*) DESC
-	`, fullFP)
+	releaseStats, err := h.Store.GetReleases(fullFP)
 	if err != nil {
+		slog.Error("HandleReleases", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	defer rows.Close()
 
-	var releases []apiRelease
-	for rows.Next() {
-		var rel apiRelease
-		if err := rows.Scan(&rel.Release, &rel.Count, &rel.FirstSeen, &rel.LastSeen); err != nil {
-			continue
+	releases := make([]apiRelease, len(releaseStats))
+	for i, r := range releaseStats {
+		releases[i] = apiRelease{
+			Release:   r.Release,
+			Count:     r.Count,
+			FirstSeen: r.FirstSeen,
+			LastSeen:  r.LastSeen,
 		}
-		releases = append(releases, rel)
-	}
-	if err := rows.Err(); err != nil {
-		slog.Error("HandleReleases rows iteration", "err", err)
-		writeError(w, http.StatusInternalServerError, "internal error")
-		return
 	}
 
 	writeJSON(w, map[string]interface{}{
@@ -388,15 +300,14 @@ func (h *Handler) HandleGC(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	threshold := time.Now().UTC().Add(-dur).Format(time.RFC3339)
-	res, err := h.DB.Exec("DELETE FROM occurrences WHERE timestamp < ?", threshold)
+	threshold := time.Now().UTC().Add(-dur)
+	deleted, err := h.Store.GCOccurrences(threshold)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	deleted, _ := res.RowsAffected()
 
-	writeJSON(w, apiGCResult{Deleted: deleted, Threshold: threshold})
+	writeJSON(w, apiGCResult{Deleted: deleted, Threshold: threshold.Format(time.RFC3339)})
 }
 
 func (h *Handler) HandleResolve(w http.ResponseWriter, r *http.Request) {
@@ -577,12 +488,7 @@ func (h *Handler) HandleCorrelate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch error row
-	var typ, val, stacktrace, breadcrumbsJSON, userCtx string
-	err = h.DB.QueryRow(`
-		SELECT type, value, stacktrace, breadcrumbs, user_context
-		FROM errors WHERE fingerprint = ?
-	`, fullFP).Scan(&typ, &val, &stacktrace, &breadcrumbsJSON, &userCtx)
+	cd, err := h.Store.GetCorrelateData(fullFP)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "not found")
 		return
@@ -590,35 +496,31 @@ func (h *Handler) HandleCorrelate(w http.ResponseWriter, r *http.Request) {
 
 	result := apiCorrelation{
 		Fingerprint: fullFP,
-		Type:        typ,
-		Value:       val,
+		Type:        cd.Type,
+		Value:       cd.Value,
 	}
 
-	if stacktrace != "" {
-		result.Stacktrace = json.RawMessage(stacktrace)
+	if cd.Stacktrace != "" {
+		result.Stacktrace = json.RawMessage(cd.Stacktrace)
 	}
-	if breadcrumbsJSON != "" {
-		result.Breadcrumbs = json.RawMessage(breadcrumbsJSON)
+	if cd.Breadcrumbs != "" {
+		result.Breadcrumbs = json.RawMessage(cd.Breadcrumbs)
 	}
-	if userCtx != "" && userCtx != "null" {
-		result.User = json.RawMessage(userCtx)
+	if cd.UserContext != "" && cd.UserContext != "null" {
+		result.User = json.RawMessage(cd.UserContext)
 	}
 
 	// Fetch Nth most recent occurrence
-	var occTimestamp, occTraceID string
-	err = h.DB.QueryRow(`
-		SELECT timestamp, COALESCE(trace_id, '')
-		FROM occurrences WHERE fingerprint = ?
-		ORDER BY timestamp DESC LIMIT 1 OFFSET ?
-	`, fullFP, nth-1).Scan(&occTimestamp, &occTraceID)
-
 	var occTime time.Time
+	var occTraceID string
+	occ, err := h.Store.GetNthOccurrence(fullFP, nth)
 	if err == nil {
-		occTime, _ = time.Parse(time.RFC3339, occTimestamp)
+		occTime, _ = time.Parse(time.RFC3339, occ.Timestamp)
+		occTraceID = occ.TraceID
 		result.Occurrence = &apiOccurrence{
 			Nth:       nth,
-			Timestamp: occTimestamp,
-			TraceID:   occTraceID,
+			Timestamp: occ.Timestamp,
+			TraceID:   occ.TraceID,
 		}
 	}
 
@@ -690,6 +592,52 @@ func (h *Handler) HandleTestEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]string{"status": "sent", "to": h.Notifier.SMTP.To})
+}
+
+// summaryToAPI converts a store.ErrorSummary to the API response type.
+func summaryToAPI(s store.ErrorSummary) apiError {
+	return apiError{
+		Fingerprint: s.Fingerprint,
+		Count:       s.Count,
+		Level:       s.Level,
+		Type:        s.Type,
+		Value:       s.Value,
+		LastSeen:    s.LastSeen,
+		ResolvedAt:  s.ResolvedAt,
+		State:       s.State,
+	}
+}
+
+// detailToAPI converts a store.ErrorDetail to the API response type.
+func detailToAPI(d *store.ErrorDetail) apiErrorDetail {
+	ad := apiErrorDetail{
+		Fingerprint: d.Fingerprint,
+		Count:       d.Count,
+		Level:       d.Level,
+		Type:        d.Type,
+		Value:       d.Value,
+		Release:     d.Release,
+		Environment: d.Environment,
+		Platform:    d.Platform,
+		FirstSeen:   d.FirstSeen,
+		LastSeen:    d.LastSeen,
+		ResolvedAt:  d.ResolvedAt,
+		State:       d.State,
+		TagDist:     d.TagDist,
+	}
+	if d.Stacktrace != "" {
+		ad.Stacktrace = json.RawMessage(d.Stacktrace)
+	}
+	if d.Breadcrumbs != "" {
+		ad.Breadcrumbs = json.RawMessage(d.Breadcrumbs)
+	}
+	if d.UserContext != "" && d.UserContext != "null" {
+		ad.User = json.RawMessage(d.UserContext)
+	}
+	if d.Tags != "" && d.Tags != "null" {
+		ad.Tags = json.RawMessage(d.Tags)
+	}
+	return ad
 }
 
 // writeError writes a structured JSON error response.

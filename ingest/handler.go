@@ -2,7 +2,6 @@ package ingest
 
 import (
 	"compress/gzip"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -135,9 +134,9 @@ func MakeHandler(s *store.Store, notifier *notify.Notifier) http.HandlerFunc {
 }
 
 // HandleHealth returns an http.HandlerFunc that checks database health.
-func HandleHealth(db *sql.DB) http.HandlerFunc {
+func HandleHealth(s *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if err := db.Ping(); err != nil {
+		if err := s.Ping(); err != nil {
 			writeError(w, http.StatusServiceUnavailable, "db unhealthy")
 			return
 		}

@@ -156,8 +156,8 @@ func runServe(cfg Config) {
 		slog.Info("email notifications enabled", "to", cfg.SMTP.To, "via", cfg.SMTP.Addr(), "cooldown", cfg.SMTPCooldown, "digest", cfg.SMTPDigest, "skip_verify", cfg.SMTP.SkipVerify)
 	}
 
-	apiHandler := &api.Handler{DB: s.DB, Store: s, Integrations: cfg.Integrations, Notifier: notifier}
-	healthHandler := ingest.HandleHealth(s.DB)
+	apiHandler := &api.Handler{Store: s, Integrations: cfg.Integrations, Notifier: notifier}
+	healthHandler := ingest.HandleHealth(s)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", healthHandler)
@@ -290,7 +290,7 @@ func main() {
 	}
 	defer s.Close()
 
-	c := &cli.CLI{DB: s.DB, Store: s}
+	c := &cli.CLI{Store: s}
 	cmd := remaining[0]
 	args := remaining[1:]
 
