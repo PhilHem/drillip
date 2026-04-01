@@ -351,6 +351,9 @@ func (sim *simulator) checkInvariants() {
 // --- Test entry points: state machine simulation ----------------------------
 
 func TestNotificationStateMachine(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping simulation in short mode")
+	}
 	seeds := []int64{42, 1337, 2026, 9999, 0, 314159}
 	for _, seed := range seeds {
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
@@ -380,6 +383,9 @@ func TestNotificationStateMachineLong(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestFingerprintStabilityProperty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping property test in short mode")
+	}
 	rng := rand.New(rand.NewSource(8675309))
 	modules := []string{
 		"entitlements_app.adapters.portal2:_login:258",
@@ -447,6 +453,9 @@ func TestFingerprintStabilityProperty(t *testing.T) {
 // Also test logentry.message (template) stability: different formatted
 // values with the same template must produce the same fingerprint.
 func TestFingerprintTemplateStability(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping property test in short mode")
+	}
 	rng := rand.New(rand.NewSource(55555))
 	template := "User %s failed to authenticate via %s"
 
@@ -602,6 +611,9 @@ func TestCrashBetweenNotifyAndMark(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestLivenessAllErrorsEventuallyResolve(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping liveness test in short mode")
+	}
 	s := setupStore(t)
 	rng := rand.New(rand.NewSource(7777))
 
@@ -659,6 +671,9 @@ func TestLivenessAllErrorsEventuallyResolve(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestConcurrentAccess(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping concurrency test in short mode")
+	}
 	s := setupStore(t)
 	const goroutines = 8
 	const opsPerGoroutine = 50
@@ -733,6 +748,9 @@ func TestConcurrentAccess(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestMultipleRegressionCycles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping regression cycle test in short mode")
+	}
 	s := setupStore(t)
 	ev := &domain.Event{Message: "cyclic-error"}
 

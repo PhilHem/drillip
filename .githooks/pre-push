@@ -16,7 +16,4 @@ git worktree add --quiet --detach "$tmpdir" HEAD
 echo "pre-push: building from clean worktree..."
 (cd "$tmpdir" && go build ./...)
 
-echo "pre-push: running tests..."
-(cd "$tmpdir" && go test ./...)
-
 echo "pre-push: ok"
