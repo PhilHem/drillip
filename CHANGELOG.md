@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.3.8 - 2026-04-01
+
+### Changed
+
+- All SQL queries now go through the Store — API and CLI handlers no longer access the database directly, making query logic easier to find and modify (#27, #28, #29, #30, #31)
+- Notification delivery is decoupled from data access — the email notifier no longer reaches into the store to check silences or record state (#32, #33)
+- Correlate command queries all external sources (logs, traces, metrics, profiles) through a single orchestration function instead of duplicated logic in the API and CLI (#35, #36, #37)
+- Periodic maintenance tasks (auto-resolve, silence pruning, occurrence GC) now run with independent error recovery — one failing task no longer stops the others (#34)
+- Event sanitization now happens inside the store layer, so any future ingest path gets it automatically
+
+### Fixed
+
+- Identical errors with different log timestamps (e.g. loguru-formatted messages) now produce the same fingerprint instead of being split into separate error groups
+
 ## v0.3.7 - 2026-03-17
 
 ### Fixed
