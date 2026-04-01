@@ -1,6 +1,6 @@
 BINARY := drillip
 
-.PHONY: build test lint fmt clean
+.PHONY: build test lint fmt clean setup
 
 build:
 	go build -ldflags="-s -w" -o $(BINARY) .
@@ -16,3 +16,6 @@ fmt:
 
 clean:
 	rm -f $(BINARY)
+
+setup:
+	git config core.hooksPath .githooks

@@ -1,0 +1,22 @@
+#!/bin/sh
+# Pre-push hook: build in a temporary worktree to catch untracked dependencies.
+# The local build always passes because Go sees all files on disk, even
+# untracked ones. CI only sees committed files. This hook closes that gap.
+
+set -e
+
+remote="$1"
+
+# Create a temporary worktree from HEAD
+tmpdir=$(mktemp -d)
+trap 'git worktree remove --force "$tmpdir" 2>/dev/null; rm -rf "$tmpdir"' EXIT
+
+git worktree add --quiet --detach "$tmpdir" HEAD
+
+echo "pre-push: building from clean worktree..."
+(cd "$tmpdir" && go build ./...)
+
+echo "pre-push: running tests..."
+(cd "$tmpdir" && go test ./...)
+
+echo "pre-push: ok"
