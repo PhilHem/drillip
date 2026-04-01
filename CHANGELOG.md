@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.11 - 2026-04-01
+
+### Fixed
+
+- Release workflow no longer times out — simulation tests are local-only, CI runs fast tests on both push and release
+
 ## v0.3.10 - 2026-04-01
 
 ### Changed
