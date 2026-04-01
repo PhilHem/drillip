@@ -19,9 +19,13 @@ func Fingerprint(ev *Event) string {
 			h.Write([]byte(fmt.Sprintf("%d", f.Lineno)))
 		}
 	} else {
-		// Message: hash the message content
+		// Message: hash a stable representation.
+		// Prefer the unformatted template (logentry.message) which is the
+		// same across invocations.  Fall back to the formatted text with
+		// log-framework prefixes (timestamps, levels) stripped so that
+		// identical errors aren't split into separate fingerprints.
 		h.Write([]byte("message:"))
-		msg := ev.MessageText()
+		msg := ev.stableMessageText()
 		h.Write([]byte(msg))
 	}
 
