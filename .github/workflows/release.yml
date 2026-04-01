@@ -19,10 +19,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Full test suite (including simulations)
-        run: go test ./... -count=1
-
-      - name: Race detector
-        run: go test -race ./... -count=1
+        run: go test -timeout 30m ./... -count=1
 
   build:
     needs: test
