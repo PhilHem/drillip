@@ -15,7 +15,8 @@ import (
 
 // CLI holds the store connection for CLI commands.
 type CLI struct {
-	Store *store.Store
+	Store        *store.Store
+	Integrations integrations.Config
 }
 
 func (c *CLI) RunTop(args []string, w io.Writer) {
@@ -260,7 +261,7 @@ func (c *CLI) RunTrend(args []string, w io.Writer) {
 	printHint(w, "drillip correlate "+fullFP[:8])
 }
 
-func (c *CLI) RunCorrelate(args []string, w io.Writer, cfg integrations.Config) {
+func (c *CLI) RunCorrelate(args []string, w io.Writer) {
 	if len(args) == 0 {
 		fmt.Fprintln(w, "usage: drillip correlate <fingerprint>")
 		return
@@ -320,7 +321,7 @@ func (c *CLI) RunCorrelate(args []string, w io.Writer, cfg integrations.Config) 
 		printStacktrace(w, cd.Stacktrace)
 	}
 
-	cr := integrations.Correlate(cfg, occTime, occTraceID)
+	cr := integrations.Correlate(c.Integrations, occTime, occTraceID)
 
 	if len(cr.Logs) > 0 {
 		fmt.Fprintln(w)

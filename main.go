@@ -336,7 +336,7 @@ func main() {
 	}
 	defer s.Close()
 
-	c := &cli.CLI{Store: s}
+	c := &cli.CLI{Store: s, Integrations: cfg.Integrations}
 	cmd := remaining[0]
 	args := remaining[1:]
 
@@ -350,7 +350,7 @@ func main() {
 	case "trend":
 		c.RunTrend(args, os.Stdout)
 	case "correlate":
-		c.RunCorrelate(args, os.Stdout, cfg.Integrations)
+		c.RunCorrelate(args, os.Stdout)
 	case "releases":
 		c.RunReleases(args, os.Stdout)
 	case "stats":

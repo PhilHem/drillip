@@ -163,6 +163,7 @@ type StoreResult struct {
 
 // StoreEvent persists a domain event into the database.
 func (s *Store) StoreEvent(ev *domain.Event) (StoreResult, error) {
+	ev.Sanitize()
 	fp := domain.Fingerprint(ev)
 	now := time.Now().UTC().Format(time.RFC3339)
 	level := ev.EffectiveLevel()

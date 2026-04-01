@@ -99,8 +99,6 @@ func MakeHandler(s *store.Store, notifier *notify.Notifier) http.HandlerFunc {
 			event = &ev
 		}
 
-		event.Sanitize()
-
 		// Need either an exception or a message to store
 		hasException := event.Exception != nil && len(event.Exception.Values) > 0
 		hasMessage := event.MessageText() != ""

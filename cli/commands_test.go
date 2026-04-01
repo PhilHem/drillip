@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PhilHem/drillip/integrations"
 	"github.com/PhilHem/drillip/store"
 )
 
@@ -341,7 +340,7 @@ func TestRunGCNoArgs(t *testing.T) {
 func TestRunCorrelateNoArgs(t *testing.T) {
 	c := &CLI{}
 	var buf bytes.Buffer
-	c.RunCorrelate(nil, &buf, integrations.Config{})
+	c.RunCorrelate(nil, &buf)
 	if !strings.Contains(buf.String(), "usage") {
 		t.Fatalf("expected usage: %s", buf.String())
 	}
@@ -355,7 +354,7 @@ func TestRunCorrelateNoIntegrations(t *testing.T) {
 	insertTestOccurrence(t, s, fp, "v1.0.0", "", time.Now().UTC())
 
 	var buf bytes.Buffer
-	c.RunCorrelate([]string{fp[:4]}, &buf, integrations.Config{})
+	c.RunCorrelate([]string{fp[:4]}, &buf)
 	out := buf.String()
 	if !strings.Contains(out, "CorrelateErr") {
 		t.Fatalf("missing error type: %s", out)
@@ -372,7 +371,7 @@ func TestRunCorrelateNotFound(t *testing.T) {
 	s := setupStore(t)
 	c := &CLI{Store: s}
 	var buf bytes.Buffer
-	c.RunCorrelate([]string{"0000000000000000"}, &buf, integrations.Config{})
+	c.RunCorrelate([]string{"0000000000000000"}, &buf)
 	if !strings.Contains(buf.String(), "not found") {
 		t.Fatalf("expected not found: %s", buf.String())
 	}
