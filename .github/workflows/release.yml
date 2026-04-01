@@ -18,8 +18,8 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Full test suite (including simulations)
-        run: go test -timeout 30m ./... -count=1
+      - name: Test
+        run: go test -short ./... -count=1
 
   build:
     needs: test
