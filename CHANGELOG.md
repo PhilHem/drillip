@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.10 - 2026-04-01
+
+### Changed
+
+- CI on push now runs the fast test tier only (~5s instead of ~25s) — simulation, property, and concurrency tests are skipped with `-short`
+- Full test suite (including all simulations) runs on release tags before the docker image is built
+- Pre-push hook trimmed to build-only check (~2s) — its job is catching missing files, not running the full suite
+
 ## v0.3.9 - 2026-04-01
 
 ### Added
