@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.9 - 2026-04-01
+
+### Added
+
+- Pre-push hook that builds and tests in a clean git worktree, catching files that exist locally but were never committed — activate with `make setup`
+
 ## v0.3.8 - 2026-04-01
 
 ### Changed
