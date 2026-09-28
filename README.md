@@ -142,11 +142,15 @@ Fingerprints can be abbreviated — `drillip show 04827c` matches the full finge
 
 ## How it works
 
-**Ingestion:** Sentry SDKs POST error events. Drillip parses the envelope, extracts the exception or message, sanitizes fields, computes a SHA256 fingerprint (from exception type + top stack frame location), and stores it in SQLite. Duplicate fingerprints increment the count.
+**Ingestion:** Sentry SDKs POST error events. Drillip parses the envelope, extracts the exception or message, sanitizes fields, computes a fingerprint from the exception type and stack frame location or from the message text, and stores it in SQLite. Duplicate fingerprints increment the count.
 
 **Notifications:** New errors and regressions (resolved errors that reappear) trigger email notifications. Emails include the exception, full stacktrace, request URL, user context, breadcrumbs, tags, and CLI commands to investigate further. Multiple errors within the digest window are batched into a single summary email. Failed sends are retried with exponential backoff. Silenced fingerprints are skipped.
 
-**Lifecycle:** Errors that haven't recurred for `DRILLIP_RESOLVE_AFTER` (default 24h) are auto-resolved. If a resolved error reappears, it's flagged as a regression and re-notifies with "was resolved for X" context. Occurrences older than `DRILLIP_RETAIN` (default 90d) are automatically pruned.
+**Lifecycle:** Errors can be resolved manually or after a period without occurrences.
+A matching event after resolution reopens the error as a regression. Retention
+removes old occurrences while preserving the grouped error and its total count.
+See [How Drillip groups errors and tracks their lifecycle](docs/explanation/error-lifecycle.md)
+for grouping rules, states, and the relationship between resolution and retention.
 
 **Correlation:** The `/api/0/correlate/<fp>/` endpoint assembles everything about an error in one response: stacktrace, breadcrumbs, user context, surrounding journalctl logs, system metrics from VictoriaMetrics, distributed trace spans from VictoriaTraces, and CPU profiles from Pyroscope. Each section is omitted when the integration isn't configured.
 

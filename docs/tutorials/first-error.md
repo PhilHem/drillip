@@ -146,3 +146,6 @@ database is discarded. You can run the tutorial again from step 1.
 You have captured an error, observed a repeated occurrence, and resolved it.
 To send events from your own application, continue with
 [Send errors](../../README.md#send-errors).
+
+For the concepts behind these steps, read
+[How Drillip groups errors and tracks their lifecycle](../explanation/error-lifecycle.md).
