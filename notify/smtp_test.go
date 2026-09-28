@@ -1091,7 +1091,9 @@ func TestSendRetriesOnError(t *testing.T) {
 		return errors.New("connection refused")
 	}
 
-	n.send("subject", "text", "<html>html</html>")
+	if err := n.send("subject", "text", "<html>html</html>"); err == nil {
+		t.Fatal("expected an error after all send attempts failed")
+	}
 
 	if attempts != 3 {
 		t.Fatalf("expected 3 retry attempts, got %d", attempts)
@@ -1109,10 +1111,11 @@ func TestSendSucceedsOnSecondAttempt(t *testing.T) {
 		return nil
 	}
 
-	n.send("subject", "text", "<html>html</html>")
+	if err := n.send("subject", "text", "<html>html</html>"); err != nil {
+		t.Fatalf("expected successful retry, got %v", err)
+	}
 
 	if attempts != 2 {
 		t.Fatalf("expected 2 attempts (fail then succeed), got %d", attempts)
 	}
 }
-
