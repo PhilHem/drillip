@@ -25,6 +25,9 @@ Docker prints the container ID. This instance is reachable on your machine at
 `http://127.0.0.1:18300`. Its database is temporary: stopping the container
 deletes the tutorial data.
 
+For the environment variables used here, see the
+[configuration reference](../reference/configuration.md#core).
+
 Check that Drillip is ready. The command retries while the server starts:
 
 ```sh
