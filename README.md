@@ -1,4 +1,9 @@
-# Drillip
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/wordmark-dark.svg">
+    <img src="docs/assets/brand/wordmark-light.svg" alt="Drillip" width="480">
+  </picture>
+</h1>
 
 Lightweight, self-hosted error tracking. Drillip receives Sentry SDK error
 events, groups them in SQLite, and sends email notifications for new errors
