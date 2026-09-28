@@ -34,8 +34,8 @@ The binary uses the configured database path and listen address. See the
 
 ## systemd
 
-Use [`deploy/drillip.service`](../../deploy/drillip.service) as a starting point
-for a systemd service. Set its executable path and environment for your host.
+Follow [Run Drillip as a systemd service](run-with-systemd.md) to install the
+binary and unit, enable startup at boot, and check the running service.
 
 ## Check the server
 
