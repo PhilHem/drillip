@@ -29,6 +29,15 @@ drillip serve
 
 See [`deploy/drillip.service`](deploy/drillip.service) for a hardened unit file.
 
+## Documentation
+
+| Need | Documentation |
+|---|---|
+| Learn with a tutorial | [Capture and resolve your first error](docs/tutorials/first-error.md) |
+| Complete a task | [Set up and check email notifications](docs/how-to/email-notifications.md) |
+| Look up a setting or interface | [Configuration](docs/reference/configuration.md), [HTTP API](docs/reference/http-api.md), [CLI](docs/reference/cli.md) |
+| Understand the concepts | [Error grouping and lifecycle](docs/explanation/error-lifecycle.md) |
+
 ## Send errors
 
 Point any Sentry SDK at Drillip. The DSN key is ignored — any value works.
@@ -59,86 +68,6 @@ sentry.Init(sentry.ClientOptions{
     Environment: "production",
 })
 ```
-
-## Configuration
-
-See the [configuration reference](docs/reference/configuration.md) for environment
-variables, defaults, accepted values, and command-line overrides.
-
-To enable and test email delivery, follow
-[Set up and check email notifications](docs/how-to/email-notifications.md).
-
-## API
-
-All endpoints return JSON. Error responses use `{"error": "message"}` with appropriate HTTP status codes.
-
-### Ingest
-
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/api/1/store/` | Ingest a Sentry event (plain JSON) |
-| `POST` | `/api/1/envelope/` | Ingest a Sentry envelope (gzip/brotli supported, 10MB limit) |
-
-Events are sanitized at ingest: oversized fields are truncated, invalid levels normalized, CRLF stripped from exception types.
-
-### Query
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/0/top/` | Errors sorted by occurrence count |
-| `GET` | `/api/0/recent/?hours=1` | Errors first seen within the last N hours (max 8760) |
-| `GET` | `/api/0/show/<fp>/` | Error detail with tag distribution |
-| `GET` | `/api/0/trend/<fp>/` | Hourly occurrence histogram (24h) |
-| `GET` | `/api/0/releases/<fp>/` | Which releases had this error |
-| `GET` | `/api/0/stats/` | Total unique errors and occurrences |
-| `GET` | `/api/0/correlate/<fp>/?nth=1` | Full context: stacktrace, logs, metrics, traces, profiles |
-
-Query parameters for `top` and `recent`:
-- `?level=error` — filter by severity
-- `?tag=key=value` — filter by tag
-
-Fingerprints can be abbreviated — `/api/0/show/04827c/` matches the full fingerprint. Only lowercase hex characters (a-f, 0-9) are accepted.
-
-Responses include a `state` field: `new` (first seen within the last hour), `ongoing`, or `resolved`.
-
-### Actions
-
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/api/0/resolve/<fp>/` | Mark an error as resolved |
-| `POST` | `/api/0/gc/?older_than=30d` | Delete occurrences older than duration |
-| `POST` | `/api/0/silence/<fp>/?duration=24h&reason=...` | Silence notifications for an error |
-| `DELETE` | `/api/0/silence/<fp>/` | Remove a silence |
-| `GET` | `/api/0/silences/` | List active silences |
-| `POST` | `/api/0/test-email/` | Send a test email to verify SMTP configuration |
-
-### Health
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/` or `/-/healthy` | Returns `ok` if the database is reachable |
-
-## CLI
-
-The same binary serves HTTP and provides CLI commands for investigation.
-
-```
-drillip top [--level error] [--tag key=value] [--limit 25]
-drillip recent [--hours 1] [--level error] [--tag key=value]
-drillip show <fingerprint>
-drillip trend <fingerprint>
-drillip correlate <fingerprint> [--nth 1]
-drillip releases <fingerprint>
-drillip stats
-drillip gc <duration>                  # e.g., 30d, 24h, 2w
-drillip resolve <fingerprint>
-drillip silence <fingerprint> [duration] [--reason "..."]
-drillip silences
-drillip unsilence <fingerprint>
-drillip health
-```
-
-Fingerprints can be abbreviated — `drillip show 04827c` matches the full fingerprint.
 
 ## How it works
 
