@@ -1,0 +1,687 @@
+package sqlite
+
+import (
+	"database/sql"
+	"encoding/json"
+	"testing"
+	"time"
+
+	"github.com/PhilHem/drillip/internal/domain"
+)
+
+func setupStore(t *testing.T) *Store {
+	t.Helper()
+	s, err := Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	return s
+}
+
+func TestOccurrenceInsertion(t *testing.T) {
+	s := setupStore(t)
+
+	event := domain.Event{
+		EventID: "occ-test",
+		Release: "v3.0.0",
+		Exception: &domain.ExceptionData{
+			Values: []domain.ExceptionValue{{
+				Type:  "TestError",
+				Value: "occ test",
+				Stacktrace: &domain.Stacktrace{
+					Frames: []domain.Frame{{Filename: "occ.go", Function: "doStuff", Lineno: 1}},
+				},
+			}},
+		},
+	}
+
+	if _, err := s.StoreEvent(&event); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	var occCount int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM occurrences").Scan(&occCount); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if occCount != 1 {
+		t.Fatalf("expected 1 occurrence, got %d", occCount)
+	}
+
+	// Send again — should get 2 occurrences
+	if _, err := s.StoreEvent(&event); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM occurrences").Scan(&occCount); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if occCount != 2 {
+		t.Fatalf("expected 2 occurrences, got %d", occCount)
+	}
+
+	// Verify release_tag
+	var release string
+	if err := s.db.QueryRow("SELECT release_tag FROM occurrences LIMIT 1").Scan(&release); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if release != "v3.0.0" {
+		t.Fatalf("expected release v3.0.0, got %q", release)
+	}
+}
+
+func TestStoreEventReportsIsNew(t *testing.T) {
+	s := setupStore(t)
+
+	event := domain.Event{
+		Exception: &domain.ExceptionData{
+			Values: []domain.ExceptionValue{{
+				Type: "NewTestErr", Value: "first",
+				Stacktrace: &domain.Stacktrace{Frames: []domain.Frame{{Filename: "n.go", Function: "f", Lineno: 1}}},
+			}},
+		},
+	}
+
+	result, err := s.StoreEvent(&event)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	if !result.IsNew {
+		t.Fatal("first occurrence should be new")
+	}
+
+	result, err = s.StoreEvent(&event)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	if result.IsNew {
+		t.Fatal("second occurrence should not be new")
+	}
+}
+
+func TestOccurrenceTraceID(t *testing.T) {
+	s := setupStore(t)
+
+	event := domain.Event{
+		EventID: "trace-test",
+		Release: "v1.0.0",
+		Exception: &domain.ExceptionData{
+			Values: []domain.ExceptionValue{{
+				Type:  "TraceError",
+				Value: "trace test",
+				Stacktrace: &domain.Stacktrace{
+					Frames: []domain.Frame{{Filename: "t.go", Function: "fn", Lineno: 1}},
+				},
+			}},
+		},
+		Contexts: map[string]json.RawMessage{
+			"trace": json.RawMessage(`{"trace_id":"deadbeef12345678"}`),
+		},
+	}
+
+	if _, err := s.StoreEvent(&event); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	var traceID string
+	if err := s.db.QueryRow("SELECT trace_id FROM occurrences LIMIT 1").Scan(&traceID); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if traceID != "deadbeef12345678" {
+		t.Fatalf("expected deadbeef12345678, got %q", traceID)
+	}
+}
+
+func TestAutoResolve(t *testing.T) {
+	s := setupStore(t)
+
+	event := domain.Event{
+		Exception: &domain.ExceptionData{
+			Values: []domain.ExceptionValue{{
+				Type: "OldError", Value: "stale",
+				Stacktrace: &domain.Stacktrace{Frames: []domain.Frame{{Filename: "old.go", Function: "f", Lineno: 1}}},
+			}},
+		},
+	}
+
+	result, err := s.StoreEvent(&event)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	// Backdate last_seen to 48 hours ago
+	oldTime := time.Now().UTC().Add(-48 * time.Hour).Format(time.RFC3339)
+	if _, err := s.db.Exec("UPDATE errors SET last_seen = ? WHERE fingerprint = ?", oldTime, result.Fingerprint); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+
+	// Mark as notified — auto-resolve only reports notified errors
+	if err := s.MarkNotified(result.Fingerprint); err != nil {
+		t.Fatalf("mark notified: %v", err)
+	}
+
+	// Auto-resolve with 24h threshold
+	resolved, err := s.AutoResolve(24 * time.Hour)
+	if err != nil {
+		t.Fatalf("auto-resolve: %v", err)
+	}
+	if len(resolved) != 1 {
+		t.Fatalf("expected 1 resolved, got %d", len(resolved))
+	}
+
+	// Verify resolved_at is set
+	var resolvedAt sql.NullString
+	if err := s.db.QueryRow("SELECT resolved_at FROM errors WHERE fingerprint = ?", result.Fingerprint).Scan(&resolvedAt); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if !resolvedAt.Valid || resolvedAt.String == "" {
+		t.Fatal("expected resolved_at to be set")
+	}
+}
+
+func TestAutoResolveExcludesUnnotified(t *testing.T) {
+	s := setupStore(t)
+
+	// Store two errors
+	notifiedEvent := domain.Event{Message: "notified error"}
+	silentEvent := domain.Event{Message: "silent error"}
+
+	r1, _ := s.StoreEvent(&notifiedEvent)
+	r2, _ := s.StoreEvent(&silentEvent)
+
+	// Backdate both
+	old := time.Now().UTC().Add(-48 * time.Hour).Format(time.RFC3339)
+	s.db.Exec("UPDATE errors SET last_seen = ? WHERE fingerprint IN (?, ?)", old, r1.Fingerprint, r2.Fingerprint)
+
+	// Only mark the first as notified
+	s.MarkNotified(r1.Fingerprint)
+
+	// Auto-resolve — only the notified one should be in the returned list
+	resolved, err := s.AutoResolve(24 * time.Hour)
+	if err != nil {
+		t.Fatalf("auto-resolve: %v", err)
+	}
+	if len(resolved) != 1 {
+		t.Fatalf("expected 1 resolved (notified only), got %d", len(resolved))
+	}
+	if resolved[0].Fingerprint != r1.Fingerprint {
+		t.Fatalf("expected notified fingerprint %s, got %s", r1.Fingerprint, resolved[0].Fingerprint)
+	}
+
+	// But BOTH should be resolved in the DB
+	var count int
+	s.db.QueryRow("SELECT COUNT(*) FROM errors WHERE resolved_at IS NOT NULL").Scan(&count)
+	if count != 2 {
+		t.Fatalf("expected 2 errors resolved in DB, got %d", count)
+	}
+}
+
+func TestManualResolve(t *testing.T) {
+	s := setupStore(t)
+
+	event := domain.Event{
+		Exception: &domain.ExceptionData{
+			Values: []domain.ExceptionValue{{
+				Type: "ManualResolveErr", Value: "fix me",
+				Stacktrace: &domain.Stacktrace{Frames: []domain.Frame{{Filename: "m.go", Function: "f", Lineno: 1}}},
+			}},
+		},
+	}
+
+	result, err := s.StoreEvent(&event)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	rr, err := s.Resolve(result.Fingerprint[:8])
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if rr.Matched != 1 {
+		t.Fatalf("expected 1 resolved, got %d", rr.Matched)
+	}
+	if rr.Fingerprint != result.Fingerprint {
+		t.Fatalf("expected fingerprint %s, got %s", result.Fingerprint, rr.Fingerprint)
+	}
+	if rr.ResolvedAt == "" {
+		t.Fatal("expected ResolvedAt to be set")
+	}
+
+	// Verify resolved_at is set
+	var resolvedAt sql.NullString
+	if err := s.db.QueryRow("SELECT resolved_at FROM errors WHERE fingerprint = ?", result.Fingerprint).Scan(&resolvedAt); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if !resolvedAt.Valid || resolvedAt.String == "" {
+		t.Fatal("expected resolved_at to be set")
+	}
+
+	// Resolving again should affect 0 rows
+	rr, err = s.Resolve(result.Fingerprint[:8])
+	if err != nil {
+		t.Fatalf("resolve again: %v", err)
+	}
+	if rr.Matched != 0 {
+		t.Fatalf("expected 0 on second resolve, got %d", rr.Matched)
+	}
+}
+
+func TestRegressionDetection(t *testing.T) {
+	s := setupStore(t)
+
+	event := domain.Event{
+		Exception: &domain.ExceptionData{
+			Values: []domain.ExceptionValue{{
+				Type: "RegressionErr", Value: "comes back",
+				Stacktrace: &domain.Stacktrace{Frames: []domain.Frame{{Filename: "r.go", Function: "f", Lineno: 1}}},
+			}},
+		},
+	}
+
+	// First store — new
+	result, err := s.StoreEvent(&event)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	if !result.IsNew {
+		t.Fatal("first occurrence should be new")
+	}
+	if result.IsRegression {
+		t.Fatal("first occurrence should not be a regression")
+	}
+
+	// Resolve it
+	if _, err = s.Resolve(result.Fingerprint); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	// Verify it's resolved
+	var resolvedAt sql.NullString
+	if err := s.db.QueryRow("SELECT resolved_at FROM errors WHERE fingerprint = ?", result.Fingerprint).Scan(&resolvedAt); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if !resolvedAt.Valid || resolvedAt.String == "" {
+		t.Fatal("expected resolved_at to be set after resolve")
+	}
+
+	// Store again — should be a regression
+	result, err = s.StoreEvent(&event)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	if result.IsNew {
+		t.Fatal("regression should not be marked as new")
+	}
+	if !result.IsRegression {
+		t.Fatal("expected IsRegression=true after resolving and re-storing")
+	}
+
+	// Verify resolved_at is cleared
+	if err := s.db.QueryRow("SELECT resolved_at FROM errors WHERE fingerprint = ?", result.Fingerprint).Scan(&resolvedAt); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if resolvedAt.Valid && resolvedAt.String != "" {
+		t.Fatal("expected resolved_at to be cleared after regression")
+	}
+}
+
+func TestRegressionResolvedDuration(t *testing.T) {
+	s := setupStore(t)
+
+	event := domain.Event{
+		Exception: &domain.ExceptionData{
+			Values: []domain.ExceptionValue{{
+				Type: "DurationErr", Value: "check duration",
+				Stacktrace: &domain.Stacktrace{Frames: []domain.Frame{{Filename: "d.go", Function: "f", Lineno: 1}}},
+			}},
+		},
+	}
+
+	// Store and resolve
+	result, err := s.StoreEvent(&event)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	// Resolve and backdate resolved_at to 3 hours ago
+	resolvedTime := time.Now().UTC().Add(-3 * time.Hour).Format(time.RFC3339)
+	if _, err := s.db.Exec("UPDATE errors SET resolved_at = ? WHERE fingerprint = ?", resolvedTime, result.Fingerprint); err != nil {
+		t.Fatalf("backdate resolved_at: %v", err)
+	}
+
+	// Store again — should be a regression with duration ~3 hours
+	result, err = s.StoreEvent(&event)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	if !result.IsRegression {
+		t.Fatal("expected regression")
+	}
+	if result.ResolvedDuration < 2*time.Hour || result.ResolvedDuration > 4*time.Hour {
+		t.Fatalf("expected ResolvedDuration ~3h, got %v", result.ResolvedDuration)
+	}
+}
+
+func TestSilencePermanent(t *testing.T) {
+	s := setupStore(t)
+
+	fp := "abc123"
+	if err := s.Silence(fp, nil, "noisy error"); err != nil {
+		t.Fatalf("silence: %v", err)
+	}
+
+	if !s.IsSilenced(fp) {
+		t.Fatal("expected fingerprint to be silenced")
+	}
+
+	// Unrelated fingerprint should not be silenced
+	if s.IsSilenced("other") {
+		t.Fatal("unrelated fingerprint should not be silenced")
+	}
+}
+
+func TestSilenceWithExpiry(t *testing.T) {
+	s := setupStore(t)
+
+	fp := "expiring123"
+
+	// Silence with expiry in the past
+	past := time.Now().UTC().Add(-1 * time.Hour)
+	if err := s.Silence(fp, &past, "already expired"); err != nil {
+		t.Fatalf("silence: %v", err)
+	}
+
+	if s.IsSilenced(fp) {
+		t.Fatal("expired silence should not be active")
+	}
+}
+
+func TestSilenceWithFutureExpiry(t *testing.T) {
+	s := setupStore(t)
+
+	fp := "future123"
+	future := time.Now().UTC().Add(24 * time.Hour)
+	if err := s.Silence(fp, &future, "temporary"); err != nil {
+		t.Fatalf("silence: %v", err)
+	}
+
+	if !s.IsSilenced(fp) {
+		t.Fatal("future-expiry silence should be active")
+	}
+}
+
+func TestUnsilence(t *testing.T) {
+	s := setupStore(t)
+
+	fp := "unsil123"
+	if err := s.Silence(fp, nil, "temporary"); err != nil {
+		t.Fatalf("silence: %v", err)
+	}
+	if !s.IsSilenced(fp) {
+		t.Fatal("expected silenced")
+	}
+
+	if err := s.Unsilence(fp); err != nil {
+		t.Fatalf("unsilence: %v", err)
+	}
+	if s.IsSilenced(fp) {
+		t.Fatal("expected not silenced after unsilence")
+	}
+}
+
+func TestListSilencesExcludesExpired(t *testing.T) {
+	s := setupStore(t)
+
+	// Add permanent silence
+	if err := s.Silence("perm1", nil, "permanent"); err != nil {
+		t.Fatalf("silence: %v", err)
+	}
+
+	// Add expired silence
+	past := time.Now().UTC().Add(-1 * time.Hour)
+	if err := s.Silence("expired1", &past, "old"); err != nil {
+		t.Fatalf("silence: %v", err)
+	}
+
+	// Add future silence
+	future := time.Now().UTC().Add(24 * time.Hour)
+	if err := s.Silence("future1", &future, "soon"); err != nil {
+		t.Fatalf("silence: %v", err)
+	}
+
+	entries, err := s.ListSilences()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 active silences, got %d", len(entries))
+	}
+
+	// Verify no expired entries
+	for _, e := range entries {
+		if e.Fingerprint == "expired1" {
+			t.Fatal("expired silence should not be in list")
+		}
+	}
+}
+
+func TestPruneExpiredSilences(t *testing.T) {
+	s := setupStore(t)
+
+	// Add permanent silence
+	if err := s.Silence("perm1", nil, "permanent"); err != nil {
+		t.Fatalf("silence: %v", err)
+	}
+
+	// Add expired silence
+	past := time.Now().UTC().Add(-1 * time.Hour)
+	if err := s.Silence("expired1", &past, "old"); err != nil {
+		t.Fatalf("silence: %v", err)
+	}
+
+	pruned, err := s.PruneExpiredSilences()
+	if err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if pruned != 1 {
+		t.Fatalf("expected 1 pruned, got %d", pruned)
+	}
+
+	// Verify only permanent remains
+	entries, err := s.ListSilences()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 remaining, got %d", len(entries))
+	}
+	if entries[0].Fingerprint != "perm1" {
+		t.Fatalf("expected perm1, got %s", entries[0].Fingerprint)
+	}
+}
+
+func TestNoResolvedDurationForNewError(t *testing.T) {
+	s := setupStore(t)
+
+	event := domain.Event{
+		Exception: &domain.ExceptionData{
+			Values: []domain.ExceptionValue{{
+				Type: "FreshErr", Value: "brand new",
+				Stacktrace: &domain.Stacktrace{Frames: []domain.Frame{{Filename: "f.go", Function: "f", Lineno: 1}}},
+			}},
+		},
+	}
+
+	result, err := s.StoreEvent(&event)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	if result.ResolvedDuration != 0 {
+		t.Fatalf("expected zero ResolvedDuration for new error, got %v", result.ResolvedDuration)
+	}
+}
+
+func TestGetTagDistribution(t *testing.T) {
+	s := setupStore(t)
+
+	event := domain.Event{
+		Exception: &domain.ExceptionData{
+			Values: []domain.ExceptionValue{{
+				Type: "TagDistErr", Value: "tag dist test",
+				Stacktrace: &domain.Stacktrace{Frames: []domain.Frame{{Filename: "td.go", Function: "f", Lineno: 1}}},
+			}},
+		},
+		Tags: map[string]string{"server": "web-1"},
+	}
+
+	result, err := s.StoreEvent(&event)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	// Insert additional occurrences with tags
+	now := time.Now().UTC().Format(time.RFC3339)
+	s.db.Exec(`INSERT INTO occurrences (fingerprint, timestamp, tags) VALUES (?,?,?)`,
+		result.Fingerprint, now, `{"server":"web-1"}`)
+	s.db.Exec(`INSERT INTO occurrences (fingerprint, timestamp, tags) VALUES (?,?,?)`,
+		result.Fingerprint, now, `{"server":"web-2"}`)
+
+	dist := s.GetTagDistribution(result.Fingerprint)
+	if dist == nil {
+		t.Fatal("expected non-nil distribution")
+	}
+	serverDist, ok := dist["server"]
+	if !ok {
+		t.Fatal("expected server key in distribution")
+	}
+	if len(serverDist.Values) == 0 {
+		t.Fatal("expected at least one tag value")
+	}
+}
+
+func TestGetTagDistributionEmpty(t *testing.T) {
+	s := setupStore(t)
+
+	event := domain.Event{
+		Exception: &domain.ExceptionData{
+			Values: []domain.ExceptionValue{{
+				Type: "NoTagErr", Value: "no tags",
+				Stacktrace: &domain.Stacktrace{Frames: []domain.Frame{{Filename: "nt.go", Function: "f", Lineno: 1}}},
+			}},
+		},
+	}
+
+	result, err := s.StoreEvent(&event)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	dist := s.GetTagDistribution(result.Fingerprint)
+	if dist != nil {
+		t.Fatalf("expected nil distribution for event with no tags, got %v", dist)
+	}
+}
+
+func TestFindByPrefix(t *testing.T) {
+	s := setupStore(t)
+
+	event := domain.Event{
+		Exception: &domain.ExceptionData{
+			Values: []domain.ExceptionValue{{
+				Type: "PrefixErr", Value: "prefix test",
+				Stacktrace: &domain.Stacktrace{Frames: []domain.Frame{{Filename: "p.go", Function: "f", Lineno: 1}}},
+			}},
+		},
+	}
+
+	result, err := s.StoreEvent(&event)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	// Find by first 8 chars
+	fullFP, err := s.FindByPrefix(result.Fingerprint[:8])
+	if err != nil {
+		t.Fatalf("FindByPrefix: %v", err)
+	}
+	if fullFP != result.Fingerprint {
+		t.Fatalf("expected %s, got %s", result.Fingerprint, fullFP)
+	}
+
+	// Find by full fingerprint
+	fullFP, err = s.FindByPrefix(result.Fingerprint)
+	if err != nil {
+		t.Fatalf("FindByPrefix full: %v", err)
+	}
+	if fullFP != result.Fingerprint {
+		t.Fatalf("expected %s, got %s", result.Fingerprint, fullFP)
+	}
+}
+
+func TestGCOccurrences(t *testing.T) {
+	s := setupStore(t)
+
+	event := domain.Event{
+		Exception: &domain.ExceptionData{
+			Values: []domain.ExceptionValue{{
+				Type: "GCTestErr", Value: "gc test",
+				Stacktrace: &domain.Stacktrace{Frames: []domain.Frame{{Filename: "gc.go", Function: "f", Lineno: 1}}},
+			}},
+		},
+	}
+
+	result, err := s.StoreEvent(&event)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	// Insert an old occurrence (100 days ago)
+	oldTime := time.Now().UTC().Add(-100 * 24 * time.Hour).Format(time.RFC3339)
+	if _, err := s.db.Exec(`INSERT INTO occurrences (fingerprint, timestamp) VALUES (?, ?)`,
+		result.Fingerprint, oldTime); err != nil {
+		t.Fatalf("insert old: %v", err)
+	}
+
+	// Insert a recent occurrence (1 hour ago)
+	recentTime := time.Now().UTC().Add(-1 * time.Hour).Format(time.RFC3339)
+	if _, err := s.db.Exec(`INSERT INTO occurrences (fingerprint, timestamp) VALUES (?, ?)`,
+		result.Fingerprint, recentTime); err != nil {
+		t.Fatalf("insert recent: %v", err)
+	}
+
+	// We now have 3 occurrences: 1 from StoreEvent (now), 1 old, 1 recent
+	var total int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM occurrences").Scan(&total); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if total != 3 {
+		t.Fatalf("expected 3 occurrences before GC, got %d", total)
+	}
+
+	// GC with 90-day threshold — should delete only the old one
+	threshold := time.Now().UTC().Add(-90 * 24 * time.Hour)
+	deleted, err := s.GCOccurrences(threshold)
+	if err != nil {
+		t.Fatalf("gc: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("expected 1 deleted, got %d", deleted)
+	}
+
+	// Verify 2 remain
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM occurrences").Scan(&total); err != nil {
+		t.Fatalf("count after gc: %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("expected 2 occurrences after GC, got %d", total)
+	}
+}
+
+func TestFindByPrefixNotFound(t *testing.T) {
+	s := setupStore(t)
+
+	_, err := s.FindByPrefix("nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent prefix")
+	}
+}

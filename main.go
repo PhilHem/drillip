@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/PhilHem/drillip/internal/app"
+	"github.com/PhilHem/drillip/internal/bootstrap"
 )
 
 func main() {
@@ -20,5 +20,5 @@ func main() {
 func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
-	return app.Run(ctx, os.Args[1:], os.Stdout, os.Stderr)
+	return bootstrap.Run(ctx, os.Args[1:], os.Stdout, os.Stderr)
 }
