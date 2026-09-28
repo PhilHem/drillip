@@ -1,0 +1,59 @@
+# Adapted from ch init --template hombergs-go.
+# Structure applies to the whole application; components describe import layers.
+# Production imports are also checked by internal/architecture_test.go.
+components:
+  # ch matches prefixes, so list cross-layer integration tests before layers.
+  - name: IntegrationTests
+    patterns:
+      - internal/adapter/in/api/handler_test.go
+      - internal/adapter/in/cli/commands_test.go
+      - internal/adapter/in/ingest/handler_test.go
+      - internal/adapter/in/ingest/security_test.go
+  - name: Domain
+    patterns: [internal/domain/]
+    allowed_dependencies: []
+  - name: InboundPorts
+    patterns: [internal/application/port/in/]
+    allowed_dependencies: [Domain]
+  - name: OutboundPorts
+    patterns: [internal/application/port/out/]
+    allowed_dependencies: [Domain]
+  - name: Services
+    patterns: [internal/application/service/]
+    allowed_dependencies: [Domain, InboundPorts, OutboundPorts]
+  - name: InboundAdapters
+    patterns: [internal/adapter/in/]
+    allowed_dependencies: [Domain, InboundPorts]
+  - name: OutboundAdapters
+    patterns: [internal/adapter/out/]
+    allowed_dependencies: [Domain, OutboundPorts]
+  - name: Bootstrap
+    patterns: [internal/bootstrap/, main.go]
+    allowed_dependencies: [Domain, InboundPorts, OutboundPorts, Services, InboundAdapters, OutboundAdapters]
+
+structure_apply:
+  hombergs-go: [internal]
+
+structure_templates:
+  hombergs-go:
+    required:
+      - domain                # domain models and business rules
+      - application/port/in   # use-case interfaces and command input models
+      - application/port/out  # repository and gateway interfaces
+      - application/service   # orchestrates domain models and ports
+      - adapter/in            # driving adapters
+      - adapter/out           # driven adapters
+    optional:
+      - bootstrap              # composition root; preserve root go install
+      - adapter/in/api
+      - adapter/in/ingest
+      - adapter/in/cli
+      - adapter/out/sqlite
+      - adapter/out/smtp
+      - adapter/out/observability
+    forbidden:
+      - domain/port           # application ports have their own packages
+      - domain/ports
+      - application/command   # command input models live in port/in
+      - infrastructure        # implementations belong in adapter/out
+    closed: true

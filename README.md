@@ -205,11 +205,39 @@ Fingerprints can be abbreviated — `drillip show 04827c` matches the full finge
 
 ## Source layout
 
-`main.go` handles process signals and exit status. `internal/app` loads the
-configuration and connects the server, CLI, and maintenance tasks. The other
-packages under `internal/` implement ingestion, storage, notifications, and
-queries. Tests live beside the code they exercise. Deployment files live in
-`deploy/`.
+The source follows the `ch init --template hombergs-go` layout with explicit
+port packages and application services:
+
+```text
+main.go                         process signals and exit status
+internal/
+  domain/                       events, error models, fingerprints, query results
+  application/
+    port/in/                    use-case interfaces (package inport)
+    port/out/                   persistence, notification, and telemetry interfaces
+    service/                    ingestion, error management, correlation, maintenance
+  adapter/
+    in/api/                     JSON HTTP API
+    in/ingest/                  Sentry HTTP protocol
+    in/cli/                     command parsing and output
+    out/sqlite/                 storage and migrations
+    out/smtp/                   email delivery and formatting
+    out/observability/          journalctl, VictoriaMetrics, VictoriaTraces, Pyroscope
+  bootstrap/                    configuration, wiring, and server lifecycle
+```
+
+Services coordinate domain models through outbound ports. Inbound adapters call
+inbound ports; they do not import services or concrete outbound adapters.
+The domain and both port packages are independent of services and adapters.
+`bootstrap` constructs the concrete dependencies. It is an explicit optional
+directory in the template so the existing root executable stays installable.
+Tests live beside the code they exercise. Deployment files live in `deploy/`.
+
+`components.yaml` declares the layers and applies the `hombergs-go` structure
+template to `internal/`. Run `ch structure-check .` to check directories.
+`go test ./...` also checks production imports against the layer rules; this
+check does not depend on the current coverage of `ch`'s Go import graph.
+Integration tests may connect concrete adapters and services.
 
 Build and install the executable from the repository root with `go build .` or
 `go install .`. The published install command remains

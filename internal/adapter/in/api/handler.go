@@ -1,0 +1,634 @@
+package api
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	inport "github.com/PhilHem/drillip/internal/application/port/in"
+	"github.com/PhilHem/drillip/internal/domain"
+)
+
+// Handler serves the JSON API endpoints.
+type Handler struct {
+	Errors        inport.Errors
+	Correlation   inport.Correlator
+	Notifications inport.Notifications
+}
+
+type apiError struct {
+	Fingerprint string `json:"fingerprint"`
+	Count       int    `json:"count"`
+	Level       string `json:"level"`
+	Type        string `json:"type"`
+	Value       string `json:"value"`
+	LastSeen    string `json:"last_seen"`
+	ResolvedAt  string `json:"resolved_at,omitempty"`
+	State       string `json:"state"`
+}
+
+type apiErrorDetail struct {
+	Fingerprint string                    `json:"fingerprint"`
+	Count       int                       `json:"count"`
+	Level       string                    `json:"level"`
+	Type        string                    `json:"type"`
+	Value       string                    `json:"value"`
+	Release     string                    `json:"release,omitempty"`
+	Environment string                    `json:"environment,omitempty"`
+	Platform    string                    `json:"platform,omitempty"`
+	FirstSeen   string                    `json:"first_seen"`
+	LastSeen    string                    `json:"last_seen"`
+	ResolvedAt  string                    `json:"resolved_at,omitempty"`
+	State       string                    `json:"state"`
+	Stacktrace  json.RawMessage           `json:"stacktrace,omitempty"`
+	Breadcrumbs json.RawMessage           `json:"breadcrumbs,omitempty"`
+	User        json.RawMessage           `json:"user,omitempty"`
+	Tags        json.RawMessage           `json:"tags,omitempty"`
+	TagDist     map[string]domain.TagDist `json:"tag_distribution,omitempty"`
+}
+
+type apiStats struct {
+	UniqueErrors     int    `json:"unique_errors"`
+	TotalOccurrences int    `json:"total_occurrences"`
+	FirstSeen        string `json:"first_seen,omitempty"`
+	LastSeen         string `json:"last_seen,omitempty"`
+}
+
+func (h *Handler) HandleTop(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var f domain.ListFilter
+	f.Level = r.URL.Query().Get("level")
+	if tag := r.URL.Query().Get("tag"); tag != "" {
+		if k, v, ok := domain.ParseTag(tag); ok {
+			f.TagKey, f.TagVal = k, v
+		}
+	}
+
+	summaries, err := h.Errors.ListTop(f, 25)
+	if err != nil {
+		slog.Error("HandleTop", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	results := make([]apiError, len(summaries))
+	for i, s := range summaries {
+		results[i] = summaryToAPI(s)
+	}
+
+	writeJSON(w, results)
+}
+
+// extractFingerprint extracts and validates a fingerprint from a URL path.
+func extractFingerprint(path, prefix string) (string, bool) {
+	fp := strings.TrimSuffix(strings.TrimPrefix(path, prefix), "/")
+	if fp == "" || !domain.ValidFingerprint(fp) {
+		return "", false
+	}
+	return fp, true
+}
+
+func (h *Handler) HandleShow(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	fp, ok := extractFingerprint(r.URL.Path, "/api/0/show/")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid fingerprint")
+		return
+	}
+
+	fullFP, err := h.Errors.FindByPrefix(fp)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+
+	detail, err := h.Errors.GetDetail(fullFP)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+
+	writeJSON(w, detailToAPI(detail))
+}
+
+func (h *Handler) HandleStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	stats, err := h.Errors.GetStats()
+	if err != nil {
+		slog.Error("HandleStats", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	writeJSON(w, apiStats{
+		UniqueErrors:     stats.UniqueErrors,
+		TotalOccurrences: stats.TotalOccurrences,
+		FirstSeen:        stats.FirstSeen,
+		LastSeen:         stats.LastSeen,
+	})
+}
+
+func (h *Handler) HandleRecent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	hours := 1
+	if hStr := r.URL.Query().Get("hours"); hStr != "" {
+		if n, err := strconv.Atoi(hStr); err == nil && n > 0 {
+			if n > 8760 {
+				n = 8760
+			}
+			hours = n
+		}
+	}
+
+	since := time.Now().UTC().Add(-time.Duration(hours) * time.Hour)
+
+	var f domain.ListFilter
+	f.Level = r.URL.Query().Get("level")
+	if tag := r.URL.Query().Get("tag"); tag != "" {
+		if k, v, ok := domain.ParseTag(tag); ok {
+			f.TagKey, f.TagVal = k, v
+		}
+	}
+
+	summaries, err := h.Errors.ListRecent(f, since)
+	if err != nil {
+		slog.Error("HandleRecent", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	results := make([]apiError, len(summaries))
+	for i, s := range summaries {
+		results[i] = summaryToAPI(s)
+	}
+
+	writeJSON(w, results)
+}
+
+type apiBucket struct {
+	Hour  string `json:"hour"`
+	Count int    `json:"count"`
+}
+
+func (h *Handler) HandleTrend(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	fp, ok := extractFingerprint(r.URL.Path, "/api/0/trend/")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid fingerprint")
+		return
+	}
+
+	fullFP, err := h.Errors.FindByPrefix(fp)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+
+	since := time.Now().UTC().Add(-24 * time.Hour)
+	trendBuckets, err := h.Errors.GetTrend(fullFP, since)
+	if err != nil {
+		slog.Error("HandleTrend", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	buckets := make([]apiBucket, len(trendBuckets))
+	for i, b := range trendBuckets {
+		buckets[i] = apiBucket{Hour: b.Hour, Count: b.Count}
+	}
+
+	writeJSON(w, map[string]interface{}{
+		"fingerprint": fullFP,
+		"buckets":     buckets,
+	})
+}
+
+type apiRelease struct {
+	Release   string `json:"release"`
+	Count     int    `json:"count"`
+	FirstSeen string `json:"first_seen"`
+	LastSeen  string `json:"last_seen"`
+}
+
+func (h *Handler) HandleReleases(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	fp, ok := extractFingerprint(r.URL.Path, "/api/0/releases/")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid fingerprint")
+		return
+	}
+
+	fullFP, err := h.Errors.FindByPrefix(fp)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+
+	releaseStats, err := h.Errors.GetReleases(fullFP)
+	if err != nil {
+		slog.Error("HandleReleases", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	releases := make([]apiRelease, len(releaseStats))
+	for i, r := range releaseStats {
+		releases[i] = apiRelease{
+			Release:   r.Release,
+			Count:     r.Count,
+			FirstSeen: r.FirstSeen,
+			LastSeen:  r.LastSeen,
+		}
+	}
+
+	writeJSON(w, map[string]interface{}{
+		"fingerprint": fullFP,
+		"releases":    releases,
+	})
+}
+
+type apiGCResult struct {
+	Deleted   int64  `json:"deleted"`
+	Threshold string `json:"threshold"`
+}
+
+func (h *Handler) HandleGC(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	durStr := r.URL.Query().Get("older_than")
+	if durStr == "" {
+		writeError(w, http.StatusBadRequest, "missing older_than param (e.g., 7d, 30d, 24h)")
+		return
+	}
+
+	dur, err := domain.ParseDuration(durStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	threshold := time.Now().UTC().Add(-dur)
+	deleted, err := h.Errors.GCOccurrences(threshold)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	writeJSON(w, apiGCResult{Deleted: deleted, Threshold: threshold.Format(time.RFC3339)})
+}
+
+func (h *Handler) HandleResolve(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	fp, ok := extractFingerprint(r.URL.Path, "/api/0/resolve/")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid fingerprint")
+		return
+	}
+
+	result, err := h.Errors.Resolve(fp)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if result.Matched == 0 {
+		writeError(w, http.StatusNotFound, "not found or already resolved")
+		return
+	}
+
+	writeJSON(w, map[string]interface{}{
+		"fingerprint": result.Fingerprint,
+		"resolved_at": result.ResolvedAt,
+	})
+}
+
+func (h *Handler) HandleSilence(w http.ResponseWriter, r *http.Request) {
+	fp, ok := extractFingerprint(r.URL.Path, "/api/0/silence/")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid fingerprint")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodPost:
+		var expiresAt *time.Time
+		if durStr := r.URL.Query().Get("duration"); durStr != "" {
+			dur, err := domain.ParseDuration(durStr)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			t := time.Now().UTC().Add(dur)
+			expiresAt = &t
+		}
+		reason := r.URL.Query().Get("reason")
+		if len(reason) > 500 {
+			reason = reason[:500]
+		}
+
+		if err := h.Errors.Silence(fp, expiresAt, reason); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+
+		resp := map[string]interface{}{"fingerprint": fp, "status": "silenced"}
+		if expiresAt != nil {
+			resp["expires_at"] = expiresAt.Format(time.RFC3339)
+		}
+		writeJSON(w, resp)
+
+	case http.MethodDelete:
+		if err := h.Errors.Unsilence(fp); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		writeJSON(w, map[string]interface{}{"fingerprint": fp, "status": "unsilenced"})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+type apiSilence struct {
+	Fingerprint string `json:"fingerprint"`
+	CreatedAt   string `json:"created_at"`
+	ExpiresAt   string `json:"expires_at,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+}
+
+func (h *Handler) HandleListSilences(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	entries, err := h.Errors.ListSilences()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	var results []apiSilence
+	for _, e := range entries {
+		results = append(results, apiSilence{
+			Fingerprint: e.Fingerprint,
+			CreatedAt:   e.CreatedAt,
+			ExpiresAt:   e.ExpiresAt,
+			Reason:      e.Reason,
+		})
+	}
+
+	writeJSON(w, results)
+}
+
+// --- Correlate ---
+
+type apiCorrelation struct {
+	Fingerprint string            `json:"fingerprint"`
+	Type        string            `json:"type"`
+	Value       string            `json:"value"`
+	Occurrence  *apiOccurrence    `json:"occurrence,omitempty"`
+	Stacktrace  json.RawMessage   `json:"stacktrace,omitempty"`
+	Breadcrumbs json.RawMessage   `json:"breadcrumbs,omitempty"`
+	User        json.RawMessage   `json:"user,omitempty"`
+	Logs        []apiLogEntry     `json:"logs,omitempty"`
+	Trace       *apiTraceData     `json:"trace,omitempty"`
+	Metrics     map[string]string `json:"metrics,omitempty"`
+	Profile     []apiProfileEntry `json:"profile,omitempty"`
+}
+
+type apiOccurrence struct {
+	Nth       int    `json:"nth"`
+	Timestamp string `json:"timestamp"`
+	TraceID   string `json:"trace_id,omitempty"`
+}
+
+type apiLogEntry struct {
+	Timestamp string `json:"timestamp"`
+	Message   string `json:"message"`
+	Priority  string `json:"priority,omitempty"`
+}
+
+type apiTraceData struct {
+	ServiceName string         `json:"service_name"`
+	Spans       []apiTraceSpan `json:"spans"`
+}
+
+type apiTraceSpan struct {
+	OperationName string `json:"operation_name"`
+	Duration      string `json:"duration"`
+}
+
+type apiProfileEntry struct {
+	Function string `json:"function"`
+}
+
+func (h *Handler) HandleCorrelate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	fp, ok := extractFingerprint(r.URL.Path, "/api/0/correlate/")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid fingerprint")
+		return
+	}
+
+	nth := 1
+	if n := r.URL.Query().Get("nth"); n != "" {
+		if v, err := strconv.Atoi(n); err == nil && v > 0 {
+			nth = v
+		}
+	}
+
+	fullFP, err := h.Errors.FindByPrefix(fp)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+
+	cd, err := h.Errors.GetCorrelateData(fullFP)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+
+	result := apiCorrelation{
+		Fingerprint: fullFP,
+		Type:        cd.Type,
+		Value:       cd.Value,
+	}
+
+	if cd.Stacktrace != "" {
+		result.Stacktrace = json.RawMessage(cd.Stacktrace)
+	}
+	if cd.Breadcrumbs != "" {
+		result.Breadcrumbs = json.RawMessage(cd.Breadcrumbs)
+	}
+	if cd.UserContext != "" && cd.UserContext != "null" {
+		result.User = json.RawMessage(cd.UserContext)
+	}
+
+	// Fetch Nth most recent occurrence
+	var occTime time.Time
+	var occTraceID string
+	occ, err := h.Errors.GetNthOccurrence(fullFP, nth)
+	if err == nil {
+		occTime, _ = time.Parse(time.RFC3339, occ.Timestamp)
+		occTraceID = occ.TraceID
+		result.Occurrence = &apiOccurrence{
+			Nth:       nth,
+			Timestamp: occ.Timestamp,
+			TraceID:   occ.TraceID,
+		}
+	}
+
+	cr := h.Correlation.Correlate(occTime, occTraceID)
+
+	for _, e := range cr.Logs {
+		result.Logs = append(result.Logs, apiLogEntry{
+			Timestamp: e.Timestamp,
+			Message:   e.Message,
+			Priority:  e.Priority,
+		})
+	}
+
+	if cr.Trace != nil {
+		trace := &apiTraceData{ServiceName: cr.Trace.ServiceName}
+		for _, s := range cr.Trace.Spans {
+			trace.Spans = append(trace.Spans, apiTraceSpan{
+				OperationName: s.OperationName,
+				Duration:      s.Duration.String(),
+			})
+		}
+		result.Trace = trace
+	}
+
+	if cr.Metrics != nil && len(cr.Metrics.Values) > 0 {
+		result.Metrics = cr.Metrics.Values
+	}
+
+	for _, e := range cr.Profile {
+		result.Profile = append(result.Profile, apiProfileEntry{Function: e.Function})
+	}
+
+	writeJSON(w, result)
+}
+
+// HandleTestEmail sends a test email to verify SMTP configuration.
+func (h *Handler) HandleTestEmail(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if h.Notifications == nil {
+		writeError(w, http.StatusServiceUnavailable, "notifications not configured")
+		return
+	}
+	recipient, err := h.Notifications.SendTestEmail()
+	if errors.Is(err, inport.ErrNotificationsDisabled) {
+		writeError(w, http.StatusServiceUnavailable, "notifications not configured")
+		return
+	}
+	if err != nil {
+		slog.Error("test email failed", "err", err)
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("send failed: %v", err))
+		return
+	}
+	writeJSON(w, map[string]string{"status": "sent", "to": recipient})
+}
+
+// summaryToAPI converts a domain.ErrorSummary to the API response type.
+func summaryToAPI(s domain.ErrorSummary) apiError {
+	return apiError{
+		Fingerprint: s.Fingerprint,
+		Count:       s.Count,
+		Level:       s.Level,
+		Type:        s.Type,
+		Value:       s.Value,
+		LastSeen:    s.LastSeen,
+		ResolvedAt:  s.ResolvedAt,
+		State:       s.State,
+	}
+}
+
+// detailToAPI converts a domain.ErrorDetail to the API response type.
+func detailToAPI(d *domain.ErrorDetail) apiErrorDetail {
+	ad := apiErrorDetail{
+		Fingerprint: d.Fingerprint,
+		Count:       d.Count,
+		Level:       d.Level,
+		Type:        d.Type,
+		Value:       d.Value,
+		Release:     d.Release,
+		Environment: d.Environment,
+		Platform:    d.Platform,
+		FirstSeen:   d.FirstSeen,
+		LastSeen:    d.LastSeen,
+		ResolvedAt:  d.ResolvedAt,
+		State:       d.State,
+		TagDist:     d.TagDist,
+	}
+	if d.Stacktrace != "" {
+		ad.Stacktrace = json.RawMessage(d.Stacktrace)
+	}
+	if d.Breadcrumbs != "" {
+		ad.Breadcrumbs = json.RawMessage(d.Breadcrumbs)
+	}
+	if d.UserContext != "" && d.UserContext != "null" {
+		ad.User = json.RawMessage(d.UserContext)
+	}
+	if d.Tags != "" && d.Tags != "null" {
+		ad.Tags = json.RawMessage(d.Tags)
+	}
+	return ad
+}
+
+// writeError writes a structured JSON error response.
+func writeError(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
+// writeJSON is a helper to write a value as JSON with the appropriate headers.
+func writeJSON(w http.ResponseWriter, v interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(v)
+}
