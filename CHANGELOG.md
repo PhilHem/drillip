@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.3.13 - 2026-09-28
+
+### Changed
+
+- Error storage uses SQLite 3.53.2. (#45)
+- Brotli-compressed events are decoded with Brotli 1.2.1. (#38)
+
 ## v0.3.12 - 2026-09-28
 
 ### Fixed
