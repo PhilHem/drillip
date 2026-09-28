@@ -2,315 +2,49 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
-	"log"
-	"log/slog"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
-	"time"
 
-	"github.com/PhilHem/drillip/api"
 	"github.com/PhilHem/drillip/cli"
-	"github.com/PhilHem/drillip/domain"
-	"github.com/PhilHem/drillip/ingest"
-	"github.com/PhilHem/drillip/integrations"
-	"github.com/PhilHem/drillip/notify"
 	"github.com/PhilHem/drillip/store"
 )
 
-// Config holds all environment-based configuration.
-type Config struct {
-	DB           string
-	Addr         string
-	Project      string // project name for notifications
-	SMTP         notify.SMTPConfig
-	SMTPCooldown time.Duration
-	SMTPDigest   time.Duration
-	ResolveAfter time.Duration
-	RetainFor    time.Duration
-	Integrations integrations.Config
-}
-
-func loadConfig() Config {
-	cfg := Config{
-		DB:   "errors.db",
-		Addr: "127.0.0.1:8300",
-	}
-	if v := os.Getenv("DRILLIP_DB"); v != "" {
-		cfg.DB = v
-	}
-	if v := os.Getenv("DRILLIP_ADDR"); v != "" {
-		cfg.Addr = v
-	}
-	if v := os.Getenv("DRILLIP_PROJECT"); v != "" {
-		cfg.Project = v
-	}
-	if v := os.Getenv("DRILLIP_UNIT"); v != "" {
-		cfg.Integrations.Unit = v
-	}
-	if v := os.Getenv("DRILLIP_VM_URL"); v != "" {
-		cfg.Integrations.VMURL = v
-	}
-	if v := os.Getenv("DRILLIP_VT_URL"); v != "" {
-		cfg.Integrations.VTURL = v
-	}
-	if v := os.Getenv("DRILLIP_PYROSCOPE_URL"); v != "" {
-		cfg.Integrations.PyroscopeURL = v
-	}
-	if v := os.Getenv("DRILLIP_SERVICE"); v != "" {
-		cfg.Integrations.Service = v
-	}
-	if v := os.Getenv("DRILLIP_SMTP_HOST"); v != "" {
-		cfg.SMTP.Host = v
-	}
-	if v := os.Getenv("DRILLIP_SMTP_PORT"); v != "" {
-		cfg.SMTP.Port = v
-	}
-	if v := os.Getenv("DRILLIP_SMTP_FROM"); v != "" {
-		cfg.SMTP.From = v
-	}
-	if v := os.Getenv("DRILLIP_SMTP_TO"); v != "" {
-		cfg.SMTP.To = v
-	}
-	if v := os.Getenv("DRILLIP_SMTP_USER"); v != "" {
-		cfg.SMTP.User = v
-	}
-	if v := os.Getenv("DRILLIP_SMTP_PASS"); v != "" {
-		cfg.SMTP.Pass = v
-	}
-	if v := os.Getenv("DRILLIP_SMTP_SKIP_VERIFY"); v == "true" || v == "1" {
-		cfg.SMTP.SkipVerify = true
-	}
-	cfg.SMTPCooldown = 60 * time.Second // default
-	if v := os.Getenv("DRILLIP_SMTP_COOLDOWN"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.SMTPCooldown = d
-		} else {
-			slog.Warn("invalid DRILLIP_SMTP_COOLDOWN, using default", "value", v, "default", cfg.SMTPCooldown)
-		}
-	}
-	cfg.SMTPDigest = 5 * time.Minute // default
-	if v := os.Getenv("DRILLIP_SMTP_DIGEST"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.SMTPDigest = d
-		} else {
-			slog.Warn("invalid DRILLIP_SMTP_DIGEST, using default", "value", v, "default", cfg.SMTPDigest)
-		}
-	}
-	cfg.ResolveAfter = 24 * time.Hour // default
-	if v := os.Getenv("DRILLIP_RESOLVE_AFTER"); v != "" {
-		if d, err := domain.ParseDuration(v); err == nil {
-			cfg.ResolveAfter = d
-		} else {
-			slog.Warn("invalid DRILLIP_RESOLVE_AFTER, using default", "value", v, "default", cfg.ResolveAfter)
-		}
-	}
-	cfg.RetainFor = 90 * 24 * time.Hour // default 90 days
-	if v := os.Getenv("DRILLIP_RETAIN"); v != "" {
-		if d, err := domain.ParseDuration(v); err == nil {
-			cfg.RetainFor = d
-		} else {
-			slog.Warn("invalid DRILLIP_RETAIN, using default", "value", v, "default", cfg.RetainFor)
-		}
-	}
-	return cfg
-}
-
-func validateConfig(cfg Config) {
-	if cfg.SMTP.Host != "" && cfg.SMTP.To == "" {
-		slog.Warn("DRILLIP_SMTP_HOST set but DRILLIP_SMTP_TO empty, notifications disabled")
-	}
-	if cfg.SMTP.Host != "" && cfg.SMTP.From == "" {
-		slog.Warn("DRILLIP_SMTP_HOST set but DRILLIP_SMTP_FROM empty")
-	}
-	slog.Info("config loaded", "db", cfg.DB, "addr", cfg.Addr, "resolve_after", cfg.ResolveAfter, "cooldown", cfg.SMTPCooldown, "digest", cfg.SMTPDigest)
-}
-
-func runHealthCmd(cfg Config) {
-	resp, err := http.Get("http://" + cfg.Addr + "/-/healthy")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "unhealthy: %v\n", err)
-		os.Exit(1)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		fmt.Fprintf(os.Stderr, "unhealthy: status %d\n", resp.StatusCode)
-		os.Exit(1)
-	}
-	fmt.Println("ok")
-}
-
-func runServe(cfg Config) {
-	s, err := store.Open(cfg.DB)
-	if err != nil {
-		log.Fatalf("init db: %v", err)
-	}
-
-	var notifier *notify.Notifier
-	if cfg.SMTP.Enabled() {
-		notifier = notify.NewNotifier(cfg.SMTP, cfg.Project, cfg.SMTPCooldown, cfg.SMTPDigest, func(fp string) {
-			if err := s.MarkNotified(fp); err != nil {
-				slog.Error("notify: failed to mark notified", "fingerprint", fp, "err", err)
-			}
-		})
-		slog.Info("email notifications enabled", "to", cfg.SMTP.To, "via", cfg.SMTP.Addr(), "cooldown", cfg.SMTPCooldown, "digest", cfg.SMTPDigest, "skip_verify", cfg.SMTP.SkipVerify)
-	}
-
-	apiHandler := &api.Handler{Store: s, Integrations: cfg.Integrations, Notifier: notifier}
-	healthHandler := ingest.HandleHealth(s)
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", healthHandler)
-	mux.HandleFunc("/api/", ingest.MakeHandler(s, notifier))
-	mux.HandleFunc("/-/healthy", healthHandler)
-	mux.HandleFunc("/api/0/top/", apiHandler.HandleTop)
-	mux.HandleFunc("/api/0/recent/", apiHandler.HandleRecent)
-	mux.HandleFunc("/api/0/show/", apiHandler.HandleShow)
-	mux.HandleFunc("/api/0/trend/", apiHandler.HandleTrend)
-	mux.HandleFunc("/api/0/releases/", apiHandler.HandleReleases)
-	mux.HandleFunc("/api/0/stats/", apiHandler.HandleStats)
-	mux.HandleFunc("/api/0/gc/", apiHandler.HandleGC)
-	mux.HandleFunc("/api/0/resolve/", apiHandler.HandleResolve)
-	mux.HandleFunc("/api/0/correlate/", apiHandler.HandleCorrelate)
-	mux.HandleFunc("/api/0/test-email/", apiHandler.HandleTestEmail)
-	mux.HandleFunc("/api/0/silence/", apiHandler.HandleSilence)
-	mux.HandleFunc("/api/0/silences/", apiHandler.HandleListSilences)
-
-	srv := &http.Server{Addr: cfg.Addr, Handler: mux}
-
-	// Background maintenance goroutine
-	maint := &Maintenance{Store: s, Notifier: notifier, ResolveAfter: cfg.ResolveAfter, RetainFor: cfg.RetainFor}
-	maintCtx, cancelMaint := context.WithCancel(context.Background())
-	go maint.Run(maintCtx)
-
-	// Graceful shutdown: checkpoint WAL and close DB
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
-	go func() {
-		<-stop
-		signal.Stop(stop)
-		slog.Info("shutting down")
-		cancelMaint()
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = srv.Shutdown(ctx)
-	}()
-
-	slog.Info("drillip listening", "addr", cfg.Addr, "db", cfg.DB)
-	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
-		log.Fatal(err)
-	}
-
-	if notifier != nil {
-		notifier.Close()
-	}
-	_ = s.Checkpoint()
-	slog.Info("WAL checkpoint complete")
-	s.Close()
-}
-
-// Maintenance runs periodic housekeeping tasks: auto-resolving stale errors,
-// pruning expired silences, and garbage-collecting old occurrences.
-type Maintenance struct {
-	Store        *store.Store
-	Notifier     *notify.Notifier // nil if notifications disabled
-	ResolveAfter time.Duration
-	RetainFor    time.Duration
-}
-
-// Run starts the maintenance loop, ticking once per hour until ctx is cancelled.
-func (m *Maintenance) Run(ctx context.Context) {
-	ticker := time.NewTicker(1 * time.Hour)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			m.runTask("auto-resolve", m.autoResolve)
-			m.runTask("prune-silences", m.pruneSilences)
-			m.runTask("gc-occurrences", m.gcOccurrences)
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-func (m *Maintenance) runTask(name string, fn func()) {
-	defer func() {
-		if r := recover(); r != nil {
-			slog.Error("maintenance task panicked", "task", name, "panic", r)
-		}
-	}()
-	fn()
-}
-
-func (m *Maintenance) autoResolve() {
-	resolved, err := m.Store.AutoResolve(m.ResolveAfter)
-	if err != nil {
-		slog.Error("auto-resolve error", "err", err)
-		return
-	}
-	if len(resolved) > 0 {
-		slog.Info("auto-resolved errors", "count", len(resolved), "older_than", m.ResolveAfter)
-		if m.Notifier != nil {
-			go m.Notifier.NotifyResolved(resolved)
-		}
-	}
-}
-
-func (m *Maintenance) pruneSilences() {
-	pruned, err := m.Store.PruneExpiredSilences()
-	if err != nil {
-		slog.Error("prune silences error", "err", err)
-		return
-	}
-	if pruned > 0 {
-		slog.Info("pruned expired silences", "count", pruned)
-	}
-}
-
-func (m *Maintenance) gcOccurrences() {
-	if m.RetainFor <= 0 {
-		return
-	}
-	threshold := time.Now().UTC().Add(-m.RetainFor)
-	deleted, err := m.Store.GCOccurrences(threshold)
-	if err != nil {
-		slog.Error("gc occurrences failed", "error", err)
-		return
-	}
-	if deleted > 0 {
-		slog.Info("gc: pruned old occurrences", "deleted", deleted, "older_than", m.RetainFor)
-	}
-}
-
-func initLogger() {
-	level := slog.LevelInfo
-	if v := os.Getenv("DRILLIP_LOG_LEVEL"); v != "" {
-		switch strings.ToLower(v) {
-		case "debug":
-			level = slog.LevelDebug
-		case "warn", "warning":
-			level = slog.LevelWarn
-		case "error":
-			level = slog.LevelError
-		}
-	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
-}
-
 func main() {
 	initLogger()
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+	return runCommand(ctx, os.Args[1:], os.Stdout, os.Stderr)
+}
+
+func runCommand(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	cfg := loadConfig()
 
 	// Parse global flags before subcommand
 	globalFlags := flag.NewFlagSet("drillip", flag.ContinueOnError)
+	globalFlags.SetOutput(io.Discard)
 	dbFlag := globalFlags.String("db", "", "database path (overrides DRILLIP_DB)")
 	addrFlag := globalFlags.String("addr", "", "listen address (overrides DRILLIP_ADDR)")
-	_ = globalFlags.Parse(os.Args[1:])
+	if err := globalFlags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			globalFlags.SetOutput(stderr)
+			globalFlags.Usage()
+			return nil
+		}
+		return err
+	}
 
 	if *dbFlag != "" {
 		cfg.DB = *dbFlag
@@ -325,51 +59,68 @@ func main() {
 
 	// No args or "serve" -> start HTTP server
 	if len(remaining) == 0 || remaining[0] == "serve" {
-		runServe(cfg)
-		return
+		return runServe(ctx, cfg)
 	}
 
-	// CLI commands need the DB
+	if remaining[0] == "health" {
+		return runHealthCmd(ctx, cfg, stdout)
+	}
+
+	// Investigation commands need the DB
 	s, err := store.Open(cfg.DB)
 	if err != nil {
-		log.Fatalf("init db: %v", err)
+		return fmt.Errorf("init db: %w", err)
 	}
 	defer s.Close()
 
 	c := &cli.CLI{Store: s, Integrations: cfg.Integrations}
 	cmd := remaining[0]
-	args := remaining[1:]
+	args = remaining[1:]
 
 	switch cmd {
 	case "top":
-		c.RunTop(args, os.Stdout)
+		c.RunTop(args, stdout)
 	case "recent":
-		c.RunRecent(args, os.Stdout)
+		c.RunRecent(args, stdout)
 	case "show":
-		c.RunShow(args, os.Stdout)
+		c.RunShow(args, stdout)
 	case "trend":
-		c.RunTrend(args, os.Stdout)
+		c.RunTrend(args, stdout)
 	case "correlate":
-		c.RunCorrelate(args, os.Stdout)
+		c.RunCorrelate(args, stdout)
 	case "releases":
-		c.RunReleases(args, os.Stdout)
+		c.RunReleases(args, stdout)
 	case "stats":
-		c.RunStats(args, os.Stdout)
+		c.RunStats(args, stdout)
 	case "gc":
-		c.RunGC(args, os.Stdout)
+		c.RunGC(args, stdout)
 	case "resolve":
-		c.RunResolve(args, os.Stdout)
+		c.RunResolve(args, stdout)
 	case "silence":
-		c.RunSilence(args, os.Stdout)
+		c.RunSilence(args, stdout)
 	case "silences":
-		c.RunSilences(args, os.Stdout)
+		c.RunSilences(args, stdout)
 	case "unsilence":
-		c.RunUnsilence(args, os.Stdout)
-	case "health":
-		runHealthCmd(cfg)
+		c.RunUnsilence(args, stdout)
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
-		fmt.Fprintln(os.Stderr, "commands: serve, top, recent, show, trend, correlate, releases, stats, gc, resolve, silence, silences, unsilence, health")
-		os.Exit(1)
+		return fmt.Errorf("unknown command: %s\ncommands: serve, top, recent, show, trend, correlate, releases, stats, gc, resolve, silence, silences, unsilence, health", cmd)
 	}
+	return nil
+}
+
+func runHealthCmd(ctx context.Context, cfg Config, stdout io.Writer) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+cfg.Addr+"/-/healthy", nil)
+	if err != nil {
+		return fmt.Errorf("unhealthy: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("unhealthy: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unhealthy: status %d", resp.StatusCode)
+	}
+	_, err = fmt.Fprintln(stdout, "ok")
+	return err
 }
