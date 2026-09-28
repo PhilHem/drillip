@@ -88,6 +88,11 @@ Disabled when `HOST` or `TO` is unset.
 | `DRILLIP_SMTP_COOLDOWN` | `60s` | Min interval between emails |
 | `DRILLIP_SMTP_DIGEST` | `5m` | Batch window for burst notifications (`0` = immediate) |
 
+In digest mode, distinct errors are buffered even during the cooldown. The batch
+window is the longer of `DRILLIP_SMTP_DIGEST` and `DRILLIP_SMTP_COOLDOWN`, while
+repeat notifications for the same fingerprint remain subject to the cooldown.
+With digest disabled, the cooldown also throttles immediate sends globally.
+
 `SKIP_VERIFY` is useful in minimal containers (scratch/distroless) where the CA bundle doesn't include your SMTP server's certificate authority.
 
 Notifications are sent for:
