@@ -4,6 +4,9 @@ Lightweight, self-hosted error tracking. Receives errors via the Sentry SDK prot
 
 ## Quick start
 
+New to Drillip? Follow [Capture and resolve your first error](docs/tutorials/first-error.md)
+to start Drillip, send an event, and check its lifecycle.
+
 ### Container (recommended)
 
 ```bash
