@@ -9,9 +9,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/PhilHem/drillip/domain"
-	"github.com/PhilHem/drillip/notify"
-	"github.com/PhilHem/drillip/store"
+	"github.com/PhilHem/drillip/internal/domain"
+	"github.com/PhilHem/drillip/internal/notify"
+	"github.com/PhilHem/drillip/internal/store"
 	"github.com/andybalholm/brotli"
 )
 

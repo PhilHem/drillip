@@ -12,7 +12,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/PhilHem/drillip/domain"
+	"github.com/PhilHem/drillip/internal/domain"
 )
 
 func TestNotificationMarkedOnlyAfterDelivery(t *testing.T) {

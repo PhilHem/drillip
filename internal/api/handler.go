@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PhilHem/drillip/domain"
-	"github.com/PhilHem/drillip/integrations"
-	"github.com/PhilHem/drillip/notify"
-	"github.com/PhilHem/drillip/store"
+	"github.com/PhilHem/drillip/internal/domain"
+	"github.com/PhilHem/drillip/internal/integrations"
+	"github.com/PhilHem/drillip/internal/notify"
+	"github.com/PhilHem/drillip/internal/store"
 )
 
 // Handler serves the JSON API endpoints.

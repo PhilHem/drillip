@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PhilHem/drillip/domain"
-	"github.com/PhilHem/drillip/store"
+	"github.com/PhilHem/drillip/internal/domain"
+	"github.com/PhilHem/drillip/internal/store"
 )
 
 func setupSecurityStore(t *testing.T) *store.Store {

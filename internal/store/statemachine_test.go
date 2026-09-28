@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PhilHem/drillip/domain"
+	"github.com/PhilHem/drillip/internal/domain"
 )
 
 // ---------------------------------------------------------------------------

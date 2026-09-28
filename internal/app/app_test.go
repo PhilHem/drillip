@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"bytes"
@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestRunCommandGlobalFlags(t *testing.T) {
+func TestRunGlobalFlags(t *testing.T) {
 	// Neither help nor invalid flags should start a server or open the database.
 	t.Setenv("DRILLIP_DB", filepath.Join(t.TempDir(), "missing", "errors.db"))
 	for _, tc := range []struct {
@@ -23,7 +23,7 @@ func TestRunCommandGlobalFlags(t *testing.T) {
 	} {
 		t.Run(tc.arg, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			err := runCommand(context.Background(), []string{tc.arg}, &stdout, &stderr)
+			err := Run(context.Background(), []string{tc.arg}, &stdout, &stderr)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatal(err)
@@ -38,7 +38,7 @@ func TestRunCommandGlobalFlags(t *testing.T) {
 	}
 }
 
-func TestRunCommandHealthDoesNotOpenDatabase(t *testing.T) {
+func TestRunHealthDoesNotOpenDatabase(t *testing.T) {
 	t.Setenv("DRILLIP_DB", filepath.Join(t.TempDir(), "missing", "errors.db"))
 	for _, status := range []int{http.StatusOK, http.StatusServiceUnavailable} {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -48,7 +48,7 @@ func TestRunCommandHealthDoesNotOpenDatabase(t *testing.T) {
 			w.WriteHeader(status)
 		}))
 		var stdout, stderr bytes.Buffer
-		err := runCommand(context.Background(), []string{"--addr", strings.TrimPrefix(srv.URL, "http://"), "health"}, &stdout, &stderr)
+		err := Run(context.Background(), []string{"--addr", strings.TrimPrefix(srv.URL, "http://"), "health"}, &stdout, &stderr)
 		srv.Close()
 		if status == http.StatusOK {
 			if err != nil || stdout.String() != "ok\n" {
@@ -60,10 +60,10 @@ func TestRunCommandHealthDoesNotOpenDatabase(t *testing.T) {
 	}
 }
 
-func TestRunCommandUnknownCommand(t *testing.T) {
+func TestRunUnknownCommand(t *testing.T) {
 	t.Setenv("DRILLIP_DB", filepath.Join(t.TempDir(), "errors.db"))
 	var stdout, stderr bytes.Buffer
-	err := runCommand(context.Background(), []string{"unknown"}, &stdout, &stderr)
+	err := Run(context.Background(), []string{"unknown"}, &stdout, &stderr)
 	if err == nil || !strings.Contains(err.Error(), "unknown command: unknown") {
 		t.Fatalf("error = %v, want unknown command", err)
 	}

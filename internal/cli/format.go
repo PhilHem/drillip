@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PhilHem/drillip/domain"
+	"github.com/PhilHem/drillip/internal/domain"
 )
 
 func printTable(w io.Writer, headers []string, rows [][]string) {

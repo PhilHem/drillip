@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -19,11 +19,11 @@ func TestRunServeStartupErrors(t *testing.T) {
 	defer listener.Close()
 	for _, tc := range []struct {
 		name string
-		cfg  Config
+		cfg  config
 		want string
 	}{
-		{"database", Config{DB: filepath.Join(t.TempDir(), "missing", "errors.db"), Addr: "127.0.0.1:0"}, "init db:"},
-		{"occupied address", Config{DB: filepath.Join(t.TempDir(), "errors.db"), Addr: listener.Addr().String()}, "listen:"},
+		{"database", config{DB: filepath.Join(t.TempDir(), "missing", "errors.db"), Addr: "127.0.0.1:0"}, "init db:"},
+		{"occupied address", config{DB: filepath.Join(t.TempDir(), "errors.db"), Addr: listener.Addr().String()}, "listen:"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := runServe(context.Background(), tc.cfg); err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -38,7 +38,7 @@ func TestRunServeCancelled(t *testing.T) {
 	cancel()
 	done := make(chan error, 1)
 	go func() {
-		done <- runServe(ctx, Config{DB: ":memory:", Addr: "127.0.0.1:0"})
+		done <- runServe(ctx, config{DB: ":memory:", Addr: "127.0.0.1:0"})
 	}()
 	waitServer(t, done)
 }

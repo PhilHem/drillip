@@ -1,25 +1,25 @@
-package main
+package app
 
 import (
 	"context"
 	"log/slog"
 	"time"
 
-	"github.com/PhilHem/drillip/notify"
-	"github.com/PhilHem/drillip/store"
+	"github.com/PhilHem/drillip/internal/notify"
+	"github.com/PhilHem/drillip/internal/store"
 )
 
-// Maintenance runs periodic housekeeping tasks: auto-resolving stale errors,
+// maintenance runs periodic housekeeping tasks: auto-resolving stale errors,
 // pruning expired silences, and garbage-collecting old occurrences.
-type Maintenance struct {
+type maintenance struct {
 	Store        *store.Store
 	Notifier     *notify.Notifier // nil if notifications disabled
 	ResolveAfter time.Duration
 	RetainFor    time.Duration
 }
 
-// Run starts the maintenance loop, ticking once per hour until ctx is cancelled.
-func (m *Maintenance) Run(ctx context.Context) {
+// run starts the maintenance loop, ticking once per hour until ctx is cancelled.
+func (m *maintenance) run(ctx context.Context) {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 	for {
@@ -34,7 +34,7 @@ func (m *Maintenance) Run(ctx context.Context) {
 	}
 }
 
-func (m *Maintenance) runTask(name string, fn func()) {
+func (m *maintenance) runTask(name string, fn func()) {
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Error("maintenance task panicked", "task", name, "panic", r)
@@ -43,7 +43,7 @@ func (m *Maintenance) runTask(name string, fn func()) {
 	fn()
 }
 
-func (m *Maintenance) autoResolve() {
+func (m *maintenance) autoResolve() {
 	resolved, err := m.Store.AutoResolve(m.ResolveAfter)
 	if err != nil {
 		slog.Error("auto-resolve error", "err", err)
@@ -57,7 +57,7 @@ func (m *Maintenance) autoResolve() {
 	}
 }
 
-func (m *Maintenance) pruneSilences() {
+func (m *maintenance) pruneSilences() {
 	pruned, err := m.Store.PruneExpiredSilences()
 	if err != nil {
 		slog.Error("prune silences error", "err", err)
@@ -68,7 +68,7 @@ func (m *Maintenance) pruneSilences() {
 	}
 }
 
-func (m *Maintenance) gcOccurrences() {
+func (m *maintenance) gcOccurrences() {
 	if m.RetainFor <= 0 {
 		return
 	}

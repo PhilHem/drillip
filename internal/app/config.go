@@ -1,18 +1,19 @@
-package main
+package app
 
 import (
+	"io"
 	"log/slog"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/PhilHem/drillip/domain"
-	"github.com/PhilHem/drillip/integrations"
-	"github.com/PhilHem/drillip/notify"
+	"github.com/PhilHem/drillip/internal/domain"
+	"github.com/PhilHem/drillip/internal/integrations"
+	"github.com/PhilHem/drillip/internal/notify"
 )
 
-// Config holds all environment-based configuration.
-type Config struct {
+// config holds all environment-based configuration.
+type config struct {
 	DB           string
 	Addr         string
 	Project      string // project name for notifications
@@ -24,8 +25,8 @@ type Config struct {
 	Integrations integrations.Config
 }
 
-func loadConfig() Config {
-	cfg := Config{
+func loadConfig() config {
+	cfg := config{
 		DB:   "errors.db",
 		Addr: "127.0.0.1:8300",
 	}
@@ -109,7 +110,7 @@ func loadConfig() Config {
 	return cfg
 }
 
-func validateConfig(cfg Config) {
+func validateConfig(cfg config) {
 	if cfg.SMTP.Host != "" && cfg.SMTP.To == "" {
 		slog.Warn("DRILLIP_SMTP_HOST set but DRILLIP_SMTP_TO empty, notifications disabled")
 	}
@@ -119,7 +120,7 @@ func validateConfig(cfg Config) {
 	slog.Info("config loaded", "db", cfg.DB, "addr", cfg.Addr, "resolve_after", cfg.ResolveAfter, "cooldown", cfg.SMTPCooldown, "digest", cfg.SMTPDigest)
 }
 
-func initLogger() {
+func initLogger(stderr io.Writer) {
 	level := slog.LevelInfo
 	if v := os.Getenv("DRILLIP_LOG_LEVEL"); v != "" {
 		switch strings.ToLower(v) {
@@ -131,5 +132,5 @@ func initLogger() {
 			level = slog.LevelError
 		}
 	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
+	slog.SetDefault(slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: level})))
 }

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/PhilHem/drillip/domain"
+	"github.com/PhilHem/drillip/internal/domain"
 	_ "modernc.org/sqlite"
 )
 

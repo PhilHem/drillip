@@ -203,6 +203,19 @@ Fingerprints can be abbreviated — `drillip show 04827c` matches the full finge
 
 **Correlation:** The `/api/0/correlate/<fp>/` endpoint assembles everything about an error in one response: stacktrace, breadcrumbs, user context, surrounding journalctl logs, system metrics from VictoriaMetrics, distributed trace spans from VictoriaTraces, and CPU profiles from Pyroscope. Each section is omitted when the integration isn't configured.
 
+## Source layout
+
+`main.go` handles process signals and exit status. `internal/app` loads the
+configuration and connects the server, CLI, and maintenance tasks. The other
+packages under `internal/` implement ingestion, storage, notifications, and
+queries. Tests live beside the code they exercise. Deployment files live in
+`deploy/`.
+
+Build and install the executable from the repository root with `go build .` or
+`go install .`. The published install command remains
+`go install github.com/PhilHem/drillip@latest`. Application packages are internal
+and cannot be imported by other projects.
+
 ## License
 
 MIT
