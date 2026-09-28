@@ -28,10 +28,20 @@ type ProfileEntry struct {
 	Self     int64
 }
 
-// CorrelateResult holds the collected context from all configured integrations.
-type CorrelateResult struct {
-	Logs    []JournalEntry
-	Trace   *TraceData
-	Metrics *MetricsSnapshot
-	Profile []ProfileEntry
+// CorrelatedOccurrence is the selected occurrence with its parsed timestamp.
+type CorrelatedOccurrence struct {
+	Nth       int
+	Timestamp string    // stored timestamp, retained for display
+	Time      time.Time // zero when the stored timestamp cannot be parsed
+	TraceID   string
+}
+
+// Correlation combines error details, the selected occurrence, and telemetry.
+type Correlation struct {
+	Error      CorrelateData
+	Occurrence *CorrelatedOccurrence
+	Logs       []JournalEntry
+	Trace      *TraceData
+	Metrics    *MetricsSnapshot
+	Profile    []ProfileEntry
 }
