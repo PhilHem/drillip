@@ -62,67 +62,8 @@ sentry.Init(sentry.ClientOptions{
 
 ## Configuration
 
-All configuration is via environment variables. Nothing is required — Drillip works with zero config.
-
-### Core
-
-| Variable | Default | Description |
-|---|---|---|
-| `DRILLIP_DB` | `errors.db` | SQLite database path |
-| `DRILLIP_ADDR` | `127.0.0.1:8300` | Listen address |
-| `DRILLIP_PROJECT` | — | Project name shown in notifications |
-| `DRILLIP_LOG_LEVEL` | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
-
-Set `debug` to log every ingested event with fingerprint, type, and new/regression status.
-
-### Email notifications
-
-Disabled when `HOST` or `TO` is unset.
-
-| Variable | Default | Description |
-|---|---|---|
-| `DRILLIP_SMTP_HOST` | — | SMTP server |
-| `DRILLIP_SMTP_PORT` | `25` | SMTP port |
-| `DRILLIP_SMTP_FROM` | — | Sender address |
-| `DRILLIP_SMTP_TO` | — | Recipient address |
-| `DRILLIP_SMTP_USER` | — | SMTP username (optional) |
-| `DRILLIP_SMTP_PASS` | — | SMTP password (optional) |
-| `DRILLIP_SMTP_SKIP_VERIFY` | `false` | Skip TLS certificate verification (`true` or `1`) |
-| `DRILLIP_SMTP_COOLDOWN` | `60s` | Min interval between emails |
-| `DRILLIP_SMTP_DIGEST` | `5m` | Batch window for burst notifications (`0` = immediate) |
-
-In digest mode, distinct errors are buffered even during the cooldown. The batch
-window is the longer of `DRILLIP_SMTP_DIGEST` and `DRILLIP_SMTP_COOLDOWN`, while
-repeat notifications for the same fingerprint remain subject to the cooldown.
-With digest disabled, the cooldown also throttles immediate sends globally.
-
-`SKIP_VERIFY` is useful in minimal containers (scratch/distroless) where the CA bundle doesn't include your SMTP server's certificate authority.
-
-Notifications are sent for:
-- **New errors** — first time a fingerprint is seen
-- **Regressions** — a resolved error reappears (amber-styled email with "was resolved for X" context)
-- **Digests** — multiple new errors within the digest window are batched into one summary
-
-Failed sends are retried up to 3 times with exponential backoff.
-
-### Lifecycle
-
-| Variable | Default | Description |
-|---|---|---|
-| `DRILLIP_RESOLVE_AFTER` | `24h` | Auto-resolve errors with no occurrences for this duration |
-| `DRILLIP_RETAIN` | `90d` | Auto-delete occurrences older than this |
-
-Both run hourly in the background. Expired silences are also pruned in the same cycle.
-
-### Integrations (for `correlate`)
-
-| Variable | Default | Description |
-|---|---|---|
-| `DRILLIP_UNIT` | — | Systemd unit name for journalctl log correlation |
-| `DRILLIP_VM_URL` | — | VictoriaMetrics base URL for metrics at time of error |
-| `DRILLIP_VT_URL` | — | VictoriaTraces base URL for distributed trace spans |
-| `DRILLIP_PYROSCOPE_URL` | — | Pyroscope base URL for CPU profiles |
-| `DRILLIP_SERVICE` | — | Service name for Pyroscope queries |
+See the [configuration reference](docs/reference/configuration.md) for environment
+variables, defaults, accepted values, and command-line overrides.
 
 ## API
 

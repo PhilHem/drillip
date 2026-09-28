@@ -1,0 +1,92 @@
+# Configuration reference
+
+Drillip reads configuration from environment variables when it starts. All
+variables are optional. Unset or empty variables use the defaults below;
+`—` means no value is set.
+
+The global flags `--db` and `--addr` override `DRILLIP_DB` and `DRILLIP_ADDR`
+when given a non-empty value. Put these flags before the command, for example
+`drillip --db /data/errors.db --addr 0.0.0.0:8300 serve`.
+
+## Core
+
+| Variable | Default | Description |
+|---|---|---|
+| `DRILLIP_DB` | `errors.db` | SQLite database path |
+| `DRILLIP_ADDR` | `127.0.0.1:8300` | Listen address |
+| `DRILLIP_PROJECT` | — | Project name shown in notifications |
+| `DRILLIP_LOG_LEVEL` | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
+
+Log levels are case-insensitive. `warning` is also accepted for `warn`.
+Unrecognized values use `info`. Set `debug` to log every ingested event with
+fingerprint, type, and new/regression status.
+
+## Email notifications
+
+Notifications are disabled when `DRILLIP_SMTP_HOST` or `DRILLIP_SMTP_TO` is empty.
+
+| Variable | Default | Description |
+|---|---|---|
+| `DRILLIP_SMTP_HOST` | — | SMTP server |
+| `DRILLIP_SMTP_PORT` | `25` | SMTP port |
+| `DRILLIP_SMTP_FROM` | — | Sender address |
+| `DRILLIP_SMTP_TO` | — | Recipient address |
+| `DRILLIP_SMTP_USER` | — | SMTP username (optional) |
+| `DRILLIP_SMTP_PASS` | — | SMTP password (optional) |
+| `DRILLIP_SMTP_SKIP_VERIFY` | `false` | Skip TLS certificate verification (`true` or `1`) |
+| `DRILLIP_SMTP_COOLDOWN` | `60s` | Notification cooldown (`0` = no cooldown) |
+| `DRILLIP_SMTP_DIGEST` | `5m` | Batch window for burst notifications (`0` = immediate) |
+
+`DRILLIP_SMTP_COOLDOWN` and `DRILLIP_SMTP_DIGEST` accept durations such as
+`60s`, `5m`, or `1h30m`, and the value `0`. They do not accept `d` or `w`.
+An invalid value logs a warning and keeps the default.
+
+In digest mode, distinct errors are buffered even during the cooldown. The batch
+window is the longer of `DRILLIP_SMTP_DIGEST` and `DRILLIP_SMTP_COOLDOWN`, while
+repeat notifications for the same fingerprint remain subject to the cooldown.
+With digest disabled, the cooldown also throttles immediate sends globally.
+
+`DRILLIP_SMTP_SKIP_VERIFY` is enabled only by the exact values `true` or `1`.
+It disables TLS certificate verification, including when the SMTP server's
+certificate authority is absent from the container's trust store.
+
+Notifications are sent for:
+
+- **New errors** — first time a fingerprint is seen
+- **Regressions** — a resolved error reappears (amber-styled email with "was resolved for X" context)
+- **Digests** — multiple new errors within the digest window are batched into one summary
+
+Each email send has at most three attempts, with waits of 2 and 4 seconds
+before the retries.
+
+## Lifecycle
+
+| Variable | Default | Description |
+|---|---|---|
+| `DRILLIP_RESOLVE_AFTER` | `24h` | Auto-resolve errors with no occurrences for this duration |
+| `DRILLIP_RETAIN` | `90d` | Auto-delete occurrences older than this |
+
+Both variables accept a whole number followed by `h`, `d`, or `w`, such as
+`24h`, `90d`, or `2w`. A day is 24 hours and a week is 7 days. An invalid
+value logs a warning and keeps the default. `DRILLIP_RETAIN=0h` disables
+automatic occurrence deletion; bare `0` is invalid. `DRILLIP_RESOLVE_AFTER=0h`
+does not disable auto-resolution.
+
+Both tasks run hourly while the server is running. Expired silences are also
+pruned in the same cycle.
+
+## Integrations (for `correlate`)
+
+| Variable | Default | Description |
+|---|---|---|
+| `DRILLIP_UNIT` | — | Systemd unit name for journalctl log correlation |
+| `DRILLIP_VM_URL` | — | VictoriaMetrics base URL for metrics at time of error |
+| `DRILLIP_VT_URL` | — | VictoriaTraces base URL for distributed trace spans |
+| `DRILLIP_PYROSCOPE_URL` | — | Pyroscope base URL for CPU profiles |
+| `DRILLIP_SERVICE` | — | Service name for Pyroscope queries |
+
+These settings apply to both the `correlate` CLI command and the HTTP
+correlation endpoint. Each integration is optional. Journal correlation needs
+`journalctl` and access to the selected unit's logs. Trace correlation also
+needs a trace ID on the occurrence. Profile correlation needs both
+`DRILLIP_PYROSCOPE_URL` and `DRILLIP_SERVICE`.
