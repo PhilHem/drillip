@@ -12,7 +12,7 @@ import (
 	"github.com/PhilHem/drillip/internal/domain"
 )
 
-// CLI holds the store connection for CLI commands.
+// CLI runs commands through application use-case ports.
 type CLI struct {
 	Errors      inport.Errors
 	Correlation inport.Correlator
@@ -280,37 +280,21 @@ func (c *CLI) RunCorrelate(args []string, w io.Writer) {
 		return
 	}
 
-	// Resolve full fingerprint
-	fullFP, err := c.Errors.FindByPrefix(fp)
+	cr, err := c.Correlation.Correlate(inport.CorrelateQuery{Fingerprint: fp, Nth: *nth})
 	if err != nil {
 		fmt.Fprintf(w, "error not found: %s\n", fp)
 		return
 	}
-
-	// Fetch error row
-	cd, err := c.Errors.GetCorrelateData(fullFP)
-	if err != nil {
-		fmt.Fprintf(w, "error not found: %s\n", fp)
-		return
-	}
-
-	// Fetch Nth most recent occurrence
-	var occTimestamp, occTraceID string
-	var occTime time.Time
-	occ, occErr := c.Errors.GetNthOccurrence(fullFP, *nth)
-	if occErr == nil {
-		occTimestamp = occ.Timestamp
-		occTraceID = occ.TraceID
-		occTime, _ = time.Parse(time.RFC3339, occTimestamp)
-	}
+	cd := cr.Error
+	fullFP := cd.Fingerprint
 
 	// Header
 	printSection(w, "Error")
 	fmt.Fprintf(w, "Type:        %s\n", cd.Type)
 	fmt.Fprintf(w, "Value:       %s\n", cd.Value)
 	fmt.Fprintf(w, "Fingerprint: %s\n", fullFP)
-	if !occTime.IsZero() {
-		fmt.Fprintf(w, "Occurrence:  #%d at %s (%s)\n", *nth, occTimestamp, timeAgo(occTime))
+	if occ := cr.Occurrence; occ != nil && !occ.Time.IsZero() {
+		fmt.Fprintf(w, "Occurrence:  #%d at %s (%s)\n", occ.Nth, occ.Timestamp, timeAgo(occ.Time))
 	}
 
 	// Stacktrace (always)
@@ -319,8 +303,6 @@ func (c *CLI) RunCorrelate(args []string, w io.Writer) {
 		printSection(w, "Stacktrace")
 		printStacktrace(w, cd.Stacktrace)
 	}
-
-	cr := c.Correlation.Correlate(occTime, occTraceID)
 
 	if len(cr.Logs) > 0 {
 		fmt.Fprintln(w)

@@ -97,14 +97,6 @@ func (s *Errors) GetReleases(fp string) ([]domain.ReleaseStats, error) {
 
 func (s *Errors) GetStats() (domain.OverviewStats, error) { return s.store.GetStats() }
 
-func (s *Errors) GetCorrelateData(fp string) (*domain.CorrelateData, error) {
-	return s.store.GetCorrelateData(fp)
-}
-
-func (s *Errors) GetNthOccurrence(fp string, nth int) (*domain.Occurrence, error) {
-	return s.store.GetNthOccurrence(fp, nth)
-}
-
 func (s *Errors) GCOccurrences(before time.Time) (int64, error) { return s.store.GCOccurrences(before) }
 
 func (s *Errors) ListSilences() ([]domain.SilenceEntry, error) { return s.store.ListSilences() }

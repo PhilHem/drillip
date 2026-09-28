@@ -3,15 +3,37 @@ package service
 import (
 	"time"
 
+	inport "github.com/PhilHem/drillip/internal/application/port/in"
 	"github.com/PhilHem/drillip/internal/domain"
 )
 
-// Correlate queries all configured external data sources for context around
-// an error occurrence. Errors from individual sources are skipped.
-func (s *Errors) Correlate(occTime time.Time, traceID string) *domain.CorrelateResult {
-	result := &domain.CorrelateResult{}
+// Correlate resolves the fingerprint, loads the error and selected occurrence,
+// and collects available telemetry. Optional sources may fail independently.
+func (s *Errors) Correlate(query inport.CorrelateQuery) (*domain.Correlation, error) {
+	fp, err := s.store.FindByPrefix(query.Fingerprint)
+	if err != nil {
+		return nil, err
+	}
+	detail, err := s.store.GetCorrelateData(fp)
+	if err != nil {
+		return nil, err
+	}
+	result := &domain.Correlation{Error: *detail}
+	result.Error.Fingerprint = fp
+	occurrence, err := s.store.GetNthOccurrence(fp, query.Nth)
+	if err != nil {
+		return result, nil
+	}
+	occTime, _ := time.Parse(time.RFC3339, occurrence.Timestamp)
+	traceID := occurrence.TraceID
+	result.Occurrence = &domain.CorrelatedOccurrence{
+		Nth:       query.Nth,
+		Timestamp: occurrence.Timestamp,
+		Time:      occTime,
+		TraceID:   traceID,
+	}
 	if s.telemetry == nil {
-		return result
+		return result, nil
 	}
 
 	if !occTime.IsZero() {
@@ -38,5 +60,5 @@ func (s *Errors) Correlate(occTime time.Time, traceID string) *domain.CorrelateR
 		}
 	}
 
-	return result
+	return result, nil
 }

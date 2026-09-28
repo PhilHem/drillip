@@ -477,20 +477,15 @@ func (h *Handler) HandleCorrelate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	fullFP, err := h.Errors.FindByPrefix(fp)
+	cr, err := h.Correlation.Correlate(inport.CorrelateQuery{Fingerprint: fp, Nth: nth})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-
-	cd, err := h.Errors.GetCorrelateData(fullFP)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "not found")
-		return
-	}
+	cd := cr.Error
 
 	result := apiCorrelation{
-		Fingerprint: fullFP,
+		Fingerprint: cd.Fingerprint,
 		Type:        cd.Type,
 		Value:       cd.Value,
 	}
@@ -505,21 +500,13 @@ func (h *Handler) HandleCorrelate(w http.ResponseWriter, r *http.Request) {
 		result.User = json.RawMessage(cd.UserContext)
 	}
 
-	// Fetch Nth most recent occurrence
-	var occTime time.Time
-	var occTraceID string
-	occ, err := h.Errors.GetNthOccurrence(fullFP, nth)
-	if err == nil {
-		occTime, _ = time.Parse(time.RFC3339, occ.Timestamp)
-		occTraceID = occ.TraceID
+	if occ := cr.Occurrence; occ != nil {
 		result.Occurrence = &apiOccurrence{
-			Nth:       nth,
+			Nth:       occ.Nth,
 			Timestamp: occ.Timestamp,
 			TraceID:   occ.TraceID,
 		}
 	}
-
-	cr := h.Correlation.Correlate(occTime, occTraceID)
 
 	for _, e := range cr.Logs {
 		result.Logs = append(result.Logs, apiLogEntry{

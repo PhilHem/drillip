@@ -16,8 +16,6 @@ type Queries interface {
 	GetTrend(string, time.Time) ([]domain.TrendBucket, error)
 	GetReleases(string) ([]domain.ReleaseStats, error)
 	GetStats() (domain.OverviewStats, error)
-	GetCorrelateData(string) (*domain.CorrelateData, error)
-	GetNthOccurrence(string, int) (*domain.Occurrence, error)
 }
 
 // Commands changes error state and retention.
