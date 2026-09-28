@@ -52,7 +52,7 @@ Check the server logs for `email notifications enabled`. For Docker, use
 ## 3. Send a test email
 
 Set the URL to your running instance, including its actual port. For the
-README's Docker setup, use:
+[Docker setup](run-drillip.md#docker), use:
 
 ```sh
 drillip_url=http://127.0.0.1:8300
