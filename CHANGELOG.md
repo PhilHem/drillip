@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.12 - 2026-09-28
+
+### Fixed
+
+- Errors are marked as notified only after the mail server accepts the notification. (#46)
+- Digests include distinct errors received during the notification cooldown. (#46)
+- The digest window uses the longer of the configured digest interval and notification cooldown. (#46)
+
 ## v0.3.11 - 2026-04-01
 
 ### Fixed
