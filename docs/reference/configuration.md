@@ -56,8 +56,9 @@ Notifications are sent for:
 - **Regressions** — a resolved error reappears (amber-styled email with "was resolved for X" context)
 - **Digests** — multiple new errors within the digest window are batched into one summary
 
-Each email send has at most three attempts, with waits of 2 and 4 seconds
-before the retries.
+Notification emails have at most three send attempts, with waits of 2 and
+4 seconds before the retries. Test emails use one attempt and bypass digest
+batching and cooldown.
 
 ## Lifecycle
 
