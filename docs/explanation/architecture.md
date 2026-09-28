@@ -5,8 +5,7 @@ external services that deliver it. HTTP handlers and CLI commands use the
 same application services. Those services coordinate domain models through
 explicit port interfaces.
 
-The source follows the `hombergs-go` layout used by
-`ch init --template hombergs-go`. The directories identify each part's role:
+The directories identify each part's role:
 
 ```text
 main.go                         process signals and exit status
@@ -72,8 +71,8 @@ concrete adapters and services to check their behavior together.
 
 `bootstrap` reads configuration, constructs the concrete dependencies, and
 connects them to services and adapters. It also runs the server lifecycle and
-dispatches CLI commands. It is an explicit optional directory in the structure
-template because constructing the application requires access to all layers.
+dispatches CLI commands. Constructing the application requires access to all
+layers, so this wiring has its own package.
 
 The root `main.go` handles process signals and exit status and delegates to
 bootstrap. Keeping the executable at the repository root preserves the
@@ -82,10 +81,8 @@ packages live under `internal/` and cannot be imported by unrelated projects.
 
 ## Keeping the boundaries explicit
 
-[components.yaml](../../components.yaml) declares the layers and applies the
-`hombergs-go` directory template to `internal/`.
 [The architecture test](../../internal/architecture_test.go) checks production
-imports within `internal/` directly. This check runs with the Go tests and
-does not depend on the current coverage of `ch`'s Go import graph.
+imports within `internal/` against the layer rules. It runs as part of the
+Go tests and reports imports that cross a forbidden boundary.
 
 See [Contributing](../../CONTRIBUTING.md) for build and validation commands.

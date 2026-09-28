@@ -44,17 +44,6 @@ go test ./... -count=1
 CI also runs `govulncheck`. The complete workflow is in
 [.github/workflows/ci.yml](.github/workflows/ci.yml).
 
-## Check the directory structure
-
-With a version of `ch` that supports the `hombergs-go` template installed, run:
-
-```sh
-ch structure-check .
-```
-
-The rules are in [components.yaml](components.yaml). This checks directory
-structure; the Go architecture test checks production imports.
-
 ## Update documentation
 
 Keep reference details in [docs/reference](docs/reference), procedures in
