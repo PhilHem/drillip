@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.14 - 2026-09-28
+
+### Fixed
+
+- Help exits after displaying usage instructions. (#47)
+- Invalid global options stop startup with an error. (#47)
+- Health checks query the running server without opening a local database. (#47)
+- Shutdown allows active requests up to ten seconds to finish before database cleanup. (#47)
+- Scheduled maintenance stops before the database closes. (#47)
+
 ## v0.3.13 - 2026-09-28
 
 ### Changed
