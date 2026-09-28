@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">Drillip icon</title>
+  <desc id="desc">An open letter d surrounds an amber event marker on a deep green tile.</desc>
+  <rect x="1" y="1" width="126" height="126" rx="28" fill="#103B3B"/>
+  <rect x="1" y="1" width="126" height="126" rx="28" fill="none" stroke="#29605B" stroke-width="2"/>
+  <path d="M91 25v51c0 19-12 31-31 31S29 95 29 76s12-31 31-31h10" fill="none" stroke="#ECF5EC" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="53" y="69" width="14" height="14" rx="3" transform="rotate(45 60 76)" fill="#FFB562"/>
+</svg>

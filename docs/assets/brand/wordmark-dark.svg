@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="180" viewBox="0 0 560 180" role="img" aria-labelledby="title desc">
+  <title id="title">Drillip</title>
+  <desc id="desc">Drillip wordmark with geometric lowercase lettering and an amber event marker inside an open d icon.</desc>
+  <g transform="translate(16 26)">
+  <rect x="1" y="1" width="126" height="126" rx="28" fill="#103B3B"/>
+  <rect x="1" y="1" width="126" height="126" rx="28" fill="none" stroke="#29605B" stroke-width="2"/>
+  <path d="M91 25v51c0 19-12 31-31 31S29 95 29 76s12-31 31-31h10" fill="none" stroke="#ECF5EC" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="53" y="69" width="14" height="14" rx="3" transform="rotate(45 60 76)" fill="#FFB562"/>
+  </g>
+  <g transform="translate(190 20)" fill="none" stroke="#ECF5EC" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M48 70c0-16-8-26-22-26S4 54 4 70s8 26 22 26 22-10 22-26ZM48 14v82"/>
+    <path d="M78 96V48m0 16c2-16 14-23 28-17"/>
+    <path d="M130 48v48"/>
+    <path d="M165 14v72q0 10 10 10"/>
+    <path d="M203 14v72q0 10 10 10"/>
+    <path d="M243 48v48"/>
+    <path d="M277 48v78m0-56c0-16 8-26 22-26s22 10 22 26-8 26-22 26-22-10-22-26Z"/>
+  </g>
+  <g fill="#ECF5EC">
+    <circle cx="320" cy="42" r="7"/>
+    <circle cx="433" cy="42" r="7"/>
+  </g>
+</svg>
