@@ -65,6 +65,9 @@ sentry.Init(sentry.ClientOptions{
 See the [configuration reference](docs/reference/configuration.md) for environment
 variables, defaults, accepted values, and command-line overrides.
 
+To enable and test email delivery, follow
+[Set up and check email notifications](docs/how-to/email-notifications.md).
+
 ## API
 
 All endpoints return JSON. Error responses use `{"error": "message"}` with appropriate HTTP status codes.
