@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PhilHem/drillip/store"
+	"github.com/PhilHem/drillip/internal/store"
 )
 
 func setupStore(t *testing.T) *store.Store {

@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -9,13 +9,13 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/PhilHem/drillip/api"
-	"github.com/PhilHem/drillip/ingest"
-	"github.com/PhilHem/drillip/notify"
-	"github.com/PhilHem/drillip/store"
+	"github.com/PhilHem/drillip/internal/api"
+	"github.com/PhilHem/drillip/internal/ingest"
+	"github.com/PhilHem/drillip/internal/notify"
+	"github.com/PhilHem/drillip/internal/store"
 )
 
-func runServe(ctx context.Context, cfg Config) (err error) {
+func runServe(ctx context.Context, cfg config) (err error) {
 	s, err := store.Open(cfg.DB)
 	if err != nil {
 		return fmt.Errorf("init db: %w", err)
@@ -68,12 +68,12 @@ func runServe(ctx context.Context, cfg Config) (err error) {
 	srv := &http.Server{Addr: cfg.Addr, Handler: mux}
 
 	// Background maintenance goroutine
-	maint := &Maintenance{Store: s, Notifier: notifier, ResolveAfter: cfg.ResolveAfter, RetainFor: cfg.RetainFor}
+	maint := &maintenance{Store: s, Notifier: notifier, ResolveAfter: cfg.ResolveAfter, RetainFor: cfg.RetainFor}
 	maintCtx, cancelMaint := context.WithCancel(ctx)
 	maintDone := make(chan struct{})
 	go func() {
 		defer close(maintDone)
-		maint.Run(maintCtx)
+		maint.run(maintCtx)
 	}()
 	defer func() {
 		cancelMaint()

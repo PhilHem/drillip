@@ -8,9 +8,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/PhilHem/drillip/domain"
-	"github.com/PhilHem/drillip/integrations"
-	"github.com/PhilHem/drillip/store"
+	"github.com/PhilHem/drillip/internal/domain"
+	"github.com/PhilHem/drillip/internal/integrations"
+	"github.com/PhilHem/drillip/internal/store"
 )
 
 // CLI holds the store connection for CLI commands.

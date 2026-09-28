@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/PhilHem/drillip/domain"
-	"github.com/PhilHem/drillip/store"
+	"github.com/PhilHem/drillip/internal/domain"
+	"github.com/PhilHem/drillip/internal/store"
 )
 
 func setupStore(t *testing.T) *store.Store {

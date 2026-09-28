@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/PhilHem/drillip/domain"
+	"github.com/PhilHem/drillip/internal/domain"
 )
 
 // SMTPConfig holds email notification settings.
