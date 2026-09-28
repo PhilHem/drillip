@@ -98,8 +98,9 @@ func (n *Notifier) shouldNotify(fp string) bool {
 		now = n.now()
 	}
 
-	// Global cooldown
-	if n.Cooldown > 0 && !n.lastSent.IsZero() && now.Sub(n.lastSent) < n.Cooldown {
+	// Immediate sends use a global cooldown. Digests limit their send rate
+	// through the batch window, so distinct errors must still be buffered.
+	if n.Digest <= 0 && n.Cooldown > 0 && !n.lastSent.IsZero() && now.Sub(n.lastSent) < n.Cooldown {
 		return false
 	}
 
@@ -155,8 +156,8 @@ func (n *Notifier) NotifyNewError(ev *domain.Event, fp string, regression bool, 
 		ResolvedFor: resolvedFor,
 	})
 	if len(n.pending) == 1 {
-		// First item — start digest timer
-		n.timer = time.AfterFunc(n.Digest, n.flush)
+		// Keep the batch window at least as long as the global cooldown.
+		n.timer = time.AfterFunc(max(n.Digest, n.Cooldown), n.flush)
 	}
 	n.mu.Unlock()
 }
@@ -176,12 +177,13 @@ func (n *Notifier) sendIndividual(ev *domain.Event, fp string, regression bool, 
 		textBody = formatPlainEmail(ev, fp, n.Project, false, 0)
 	}
 
-	n.send(subject, textBody, htmlBody)
-	n.markNotified(fp)
+	if err := n.send(subject, textBody, htmlBody); err == nil {
+		n.markNotified(fp)
+	}
 }
 
 // send transmits an email via SMTP with retry and exponential backoff.
-func (n *Notifier) send(subject, textBody, htmlBody string) {
+func (n *Notifier) send(subject, textBody, htmlBody string) error {
 	msg := buildMultipartMIME(n.SMTP.From, n.SMTP.To, subject, textBody, htmlBody)
 
 	var auth smtp.Auth
@@ -206,11 +208,12 @@ func (n *Notifier) send(subject, textBody, htmlBody string) {
 		err = sendFn(n.SMTP.Addr(), auth, n.SMTP.From, []string{n.SMTP.To}, msg)
 		if err == nil {
 			slog.Info("notify: email sent", "to", n.SMTP.To, "subject", subject)
-			return
+			return nil
 		}
 		slog.Error("notify: send attempt failed", "attempt", attempt+1, "err", err)
 	}
 	slog.Error("notify: send failed after 3 attempts", "err", err)
+	return err
 }
 
 // sendMailSkipVerify is like smtp.SendMail but skips TLS certificate verification.
@@ -341,7 +344,9 @@ func (n *Notifier) flush() {
 	subject := sanitizeHeader(fmt.Sprintf("[drillip] %d new errors in %s", len(items), n.Project))
 	htmlBody := formatDigestHTMLEmail(items, n.Project)
 	textBody := formatDigestPlainEmail(items)
-	n.send(subject, textBody, htmlBody)
+	if err := n.send(subject, textBody, htmlBody); err != nil {
+		return
+	}
 
 	for _, p := range items {
 		n.markNotified(p.Fingerprint)
@@ -378,7 +383,7 @@ func (n *Notifier) NotifyResolved(resolved []domain.ResolvedError) {
 	subject := sanitizeHeader(fmt.Sprintf("[drillip] resolved: %d errors in %s", len(resolved), n.Project))
 	htmlBody := formatResolvedHTMLEmail(resolved, n.Project)
 	textBody := formatResolvedPlainEmail(resolved, n.Project)
-	n.send(subject, textBody, htmlBody)
+	_ = n.send(subject, textBody, htmlBody) // send logs failures after retrying.
 }
 
 // --- Resolved email formats ---
