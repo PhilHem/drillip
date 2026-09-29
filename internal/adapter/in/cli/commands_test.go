@@ -426,9 +426,9 @@ func TestRunResolve(t *testing.T) {
 	insertTestError(t, s, fp, "ResolveErr", "needs resolving", "v1.0.0")
 
 	var buf bytes.Buffer
-	c.RunResolve([]string{"aab4"}, &buf)
+	RunResolve([]string{"aab4"}, &buf, c.Errors.Resolve)
 	out := buf.String()
-	if !strings.Contains(out, "resolved 1") {
+	if !strings.Contains(out, "resolved "+fp) {
 		t.Fatalf("expected resolve confirmation: %s", out)
 	}
 
@@ -447,16 +447,15 @@ func TestRunResolveNotFound(t *testing.T) {
 	c := testCLI(s)
 
 	var buf bytes.Buffer
-	err := c.RunResolve([]string{"0000000000000000"}, &buf)
+	err := RunResolve([]string{"0000000000000000"}, &buf, c.Errors.Resolve)
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("expected not found message: %s", err)
 	}
 }
 
 func TestRunResolveNoArgs(t *testing.T) {
-	c := &CLI{}
 	var buf bytes.Buffer
-	err := c.RunResolve(nil, &buf)
+	err := RunResolve(nil, &buf, nil)
 	if err == nil || !strings.Contains(err.Error(), "usage") {
 		t.Fatalf("expected usage: %s", err)
 	}
@@ -643,7 +642,7 @@ func TestCLIReferenceContract(t *testing.T) {
 	insertTestError(t, s, "abcd111111111111", "Error", "one", "v1")
 	insertTestError(t, s, "abcd222222222222", "Error", "two", "v1")
 	c := testCLI(s)
-	for _, command := range []func([]string, io.Writer) error{c.RunShow, c.RunTrend, c.RunReleases, c.RunCorrelate, c.RunResolve, c.RunSilence, c.RunUnsilence} {
+	for _, command := range []func([]string, io.Writer) error{c.RunShow, c.RunTrend, c.RunReleases, c.RunCorrelate, func(args []string, w io.Writer) error { return RunResolve(args, w, c.Errors.Resolve) }, c.RunSilence, c.RunUnsilence} {
 		var output bytes.Buffer
 		if err := command([]string{"abcd"}, &output); !errors.Is(err, domain.ErrAmbiguousFingerprint) {
 			t.Fatalf("ambiguous: %v", err)
@@ -665,7 +664,7 @@ func TestCLIReferenceContract(t *testing.T) {
 	if s.IsSilenced("abcd111111111111") {
 		t.Fatal("unsilence did not expand prefix")
 	}
-	if err := c.RunResolve([]string{"abcd1"}, &output); err != nil {
+	if err := RunResolve([]string{"abcd1"}, &output, c.Errors.Resolve); err != nil {
 		t.Fatal(err)
 	}
 	other, _ := s.GetDetail("abcd222222222222")

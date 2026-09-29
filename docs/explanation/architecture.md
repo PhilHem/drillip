@@ -71,7 +71,10 @@ concrete adapters and services to check their behavior together.
 
 `bootstrap` reads configuration, constructs the concrete dependencies, and
 connects them to services and adapters. It also runs the server lifecycle and
-dispatches CLI commands. Constructing the application requires access to all
+dispatches CLI commands. Normal `resolve` sends its request to the running
+server so the server owns notification policy. Explicit `--offline resolve` uses
+the local application service without a notifier. Other database commands retain
+their direct local access. Constructing the application requires access to all
 layers, so this wiring has its own package.
 
 The root `main.go` handles process signals and exit status and delegates to

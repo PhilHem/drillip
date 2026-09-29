@@ -58,9 +58,9 @@ Notifications are sent for:
 - **Automatic resolutions** — the hourly maintenance task sends a summary of
   newly resolved errors that were previously marked as notified after successful
   SMTP delivery. Other stale errors are still resolved, but omitted from the email.
-- **Manual HTTP resolutions** — resolving errors through the HTTP API sends a
+- **Manual resolutions** — the HTTP API and normal `drillip resolve` send a
   summary for the matched unresolved error, even if it was not previously
-  notified. The `drillip resolve` CLI command does not send email.
+  notified. Explicit `drillip --offline resolve` does not send email.
 
 Resolution summaries are sent directly, outside the new-error digest and
 cooldown. Silencing a fingerprint suppresses new-error and regression emails;

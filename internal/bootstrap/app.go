@@ -15,6 +15,7 @@ import (
 	integrations "github.com/PhilHem/drillip/internal/adapter/out/observability"
 	store "github.com/PhilHem/drillip/internal/adapter/out/sqlite"
 	"github.com/PhilHem/drillip/internal/application/service"
+	"github.com/PhilHem/drillip/internal/domain"
 )
 
 // Run configures logging and executes the server or a CLI command.
@@ -27,6 +28,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	globalFlags := flag.NewFlagSet("drillip", flag.ContinueOnError)
 	globalFlags.SetOutput(io.Discard)
 	dbFlag := globalFlags.String("db", "", "database path (overrides DRILLIP_DB)")
+	offlineFlag := globalFlags.Bool("offline", false, "resolve directly in SQLite without notifications")
 	addrFlag := globalFlags.String("addr", "", "listen address (overrides DRILLIP_ADDR)")
 	if err := globalFlags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -47,6 +49,17 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	validateConfig(cfg)
 
 	remaining := globalFlags.Args()
+	if *offlineFlag && (len(remaining) == 0 || remaining[0] != "resolve") {
+		return fmt.Errorf("--offline is only supported with resolve")
+	}
+	if len(remaining) > 0 && remaining[0] == "resolve" && !*offlineFlag {
+		if *dbFlag != "" {
+			return fmt.Errorf("resolve uses the server; --db requires --offline")
+		}
+		return cli.RunResolve(remaining[1:], stdout, func(fp string) (domain.ResolveResult, error) {
+			return resolveOnServer(ctx, cfg.Addr, fp)
+		})
+	}
 
 	// No args or "serve" -> start HTTP server
 	if len(remaining) == 0 || remaining[0] == "serve" {
@@ -90,7 +103,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	case "gc":
 		err = c.RunGC(args, stdout)
 	case "resolve":
-		err = c.RunResolve(args, stdout)
+		err = cli.RunResolve(args, stdout, app.Resolve)
 	case "silence":
 		err = c.RunSilence(args, stdout)
 	case "silences":

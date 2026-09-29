@@ -4,20 +4,22 @@ The same binary runs the HTTP server and provides commands for investigation
 and maintenance. With no command, `drillip` starts the server, as does
 `drillip serve`.
 
-Investigation and maintenance commands open the configured SQLite database
-directly. They do not call the HTTP API. Run them with access to the same
-database as the server. The `health` command instead calls the server over HTTP.
+`resolve` and `health` call the configured server over HTTP. Normal resolution
+therefore uses the server's notification policy and does not need database access
+or SMTP configuration in the CLI process. Other investigation and maintenance
+commands open SQLite directly and need access to the same database as the server.
 
 ## Invocation and global options
 
 ```text
-drillip [--db <path>] [--addr <host:port>] <command> [arguments]
+drillip [--db <path>] [--addr <host:port>] [--offline] <command> [arguments]
 ```
 
 | Option | Effect |
 |---|---|
 | `--db <path>` | Override `DRILLIP_DB` with a non-empty database path. |
-| `--addr <host:port>` | Override `DRILLIP_ADDR` with a non-empty server listen address or health-check target. |
+| `--addr <host:port>` | Override `DRILLIP_ADDR` with a non-empty server listen address or HTTP command target. |
+| `--offline` | With `resolve` only: update SQLite directly without notifications. |
 | `--help` | Print global option help. |
 
 Put global options before the command. Put command options before positional
@@ -53,10 +55,10 @@ arguments. Do not type the brackets.
 | `drillip releases <fingerprint>` | Show retained occurrence counts by release. |
 | `drillip stats` | Show the number of grouped errors and retained occurrences. |
 | `drillip gc <duration>` | Delete occurrences older than the duration. |
-| `drillip resolve <fingerprint>` | Resolve the uniquely identified error. |
-| `drillip silence [--reason <text>] <fingerprint> [duration]` | Silence notifications for the exact fingerprint, indefinitely if duration is omitted. |
+| `drillip resolve <fingerprint>` | Resolve the uniquely identified error through the server. |
+| `drillip silence [--reason <text>] <fingerprint> [duration]` | Silence notifications for the uniquely identified error, indefinitely if duration is omitted. |
 | `drillip silences` | List active silences. |
-| `drillip unsilence <fingerprint>` | Remove silences for the exact fingerprint. |
+| `drillip unsilence <fingerprint>` | Remove silences for the uniquely identified error. |
 | `drillip health` | Call `/-/healthy` at the configured address; print `ok` on HTTP `200`, with a two-second request deadline. |
 
 The health target uses loopback when the configured listen address is a wildcard
@@ -71,6 +73,38 @@ numbers followed by `h`, `d`, or `w`, for example `24h`, `30d`, or `2w`.
 
 `correlate` includes available data from the configured
 [observability integrations](configuration.md#integrations-for-correlate).
+
+## Resolve online or offline
+
+Normally, use:
+
+```sh
+drillip --addr 127.0.0.1:8300 resolve 04827c
+```
+
+The command calls the same HTTP action as other API clients, with a ten-second
+request deadline, and prints the resolved full fingerprint. Success confirms the
+state change, not SMTP delivery. The server owns notification configuration and
+retries. A failed request never falls back to a local database update. If the
+connection fails after submission, inspect the error's state before retrying;
+the server may already have applied the change.
+
+For deliberate offline maintenance, use:
+
+```sh
+drillip --offline --db /data/errors.db resolve 04827c
+```
+
+This updates SQLite without contacting a server or sending notifications. There
+is no notification queued for later delivery. `--offline` is rejected for other
+commands, and passing `--db` to online `resolve` is rejected to prevent accidentally
+resolving an error on a different server.
+
+Earlier versions always resolved locally without email. To retain that behavior,
+add `--offline` before the command. Upgrade the server together with the CLI to
+use the same reference and notification contracts; older servers retain their
+previous prefix semantics. The pinned v0.3.14 tutorial image retains its older
+local resolution behavior until its Drillip version is upgraded.
 
 ## Fingerprints
 
