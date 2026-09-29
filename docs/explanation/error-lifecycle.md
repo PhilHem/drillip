@@ -100,7 +100,7 @@ delivery; they do not prevent events from being stored or change their state.
 
 Resolution can also trigger a summary email. The hourly automatic-resolution
 task includes only errors with a previously successful notification. Manual
-resolution through the HTTP API includes all matching unresolved errors; the
+resolution through the HTTP API includes the matched unresolved error; the
 CLI does not send a resolution email. Resolution summaries bypass the new-error
 silence, cooldown, and digest controls. See the
 [notification reference](../reference/configuration.md#email-notifications)

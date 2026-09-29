@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -58,7 +57,7 @@ func TestCorrelateHandlerPreservesPartialResultsAndErrors(t *testing.T) {
 	for _, failed := range []bool{false, true} {
 		h := &Handler{Correlation: correlatorFunc(func(inport.CorrelateQuery) (*domain.Correlation, error) {
 			if failed {
-				return nil, errors.New("error unavailable")
+				return nil, domain.ErrErrorNotFound
 			}
 			return &domain.Correlation{Error: domain.CorrelateData{Fingerprint: "abcdef0123456789", Value: "failed"}}, nil
 		})}

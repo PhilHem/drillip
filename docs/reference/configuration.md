@@ -59,7 +59,7 @@ Notifications are sent for:
   newly resolved errors that were previously marked as notified after successful
   SMTP delivery. Other stale errors are still resolved, but omitted from the email.
 - **Manual HTTP resolutions** — resolving errors through the HTTP API sends a
-  summary of the matching unresolved errors, even if they were not previously
+  summary for the matched unresolved error, even if it was not previously
   notified. The `drillip resolve` CLI command does not send email.
 
 Resolution summaries are sent directly, outside the new-error digest and

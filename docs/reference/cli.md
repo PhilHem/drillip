@@ -53,7 +53,7 @@ arguments. Do not type the brackets.
 | `drillip releases <fingerprint>` | Show retained occurrence counts by release. |
 | `drillip stats` | Show the number of grouped errors and retained occurrences. |
 | `drillip gc <duration>` | Delete occurrences older than the duration. |
-| `drillip resolve <fingerprint>` | Resolve all unresolved errors matching the prefix. |
+| `drillip resolve <fingerprint>` | Resolve the uniquely identified error. |
 | `drillip silence [--reason <text>] <fingerprint> [duration]` | Silence notifications for the exact fingerprint, indefinitely if duration is omitted. |
 | `drillip silences` | List active silences. |
 | `drillip unsilence <fingerprint>` | Remove silences for the exact fingerprint. |
@@ -75,12 +75,16 @@ numbers followed by `h`, `d`, or `w`, for example `24h`, `30d`, or `2w`.
 ## Fingerprints
 
 Fingerprint arguments accept 1–16 lowercase hexadecimal characters (`a-f`,
-`0-9`). `show`, `trend`, `correlate`, and `releases` accept a prefix such as
-`04827c`. If several errors match, these lookups select one match rather than
-rejecting the prefix. `resolve` applies to all unresolved matches.
+`0-9`). All error operations accept a full fingerprint or a unique prefix.
+An unknown reference fails; an ambiguous prefix fails and asks for a longer
+fingerprint. `show` prints the full fingerprint, and state changes target exactly
+one error. Silence creation also requires an existing error.
 
-Use the full fingerprint for `silence` and `unsilence`: these commands do not
-expand prefixes. `show` prints the full fingerprint for a selected error.
+This changes earlier behavior: lookups no longer select an arbitrary match,
+`resolve` no longer updates every match, and silence commands expand unique
+prefixes. For a bulk operation, enumerate the intended full fingerprints and
+invoke the command for each. Existing silences with no corresponding error can
+still be removed by their exact stored fingerprint from `drillip silences`.
 
 For the meaning of counts and states, see the
 [error lifecycle explanation](../explanation/error-lifecycle.md).

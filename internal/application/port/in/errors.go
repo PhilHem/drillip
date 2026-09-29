@@ -22,8 +22,8 @@ type Queries interface {
 type Commands interface {
 	Resolve(string) (domain.ResolveResult, error)
 	GCOccurrences(time.Time) (int64, error)
-	Silence(string, *time.Time, string) error
-	Unsilence(string) error
+	Silence(string, *time.Time, string) (string, error)
+	Unsilence(string) (string, error)
 	ListSilences() ([]domain.SilenceEntry, error)
 }
 

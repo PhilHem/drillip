@@ -73,14 +73,18 @@ and HTTP `502` when sending fails. See the
 ## Fingerprints
 
 Fingerprint arguments accept 1–16 lowercase hexadecimal characters (`a-f`,
-`0-9`). `show`, `trend`, `releases`, and `correlate` accept a prefix, for example
-`/api/0/show/04827c/`. If several errors match, the lookup selects one match;
-it does not reject an ambiguous prefix. `resolve` resolves all unresolved
-errors with the prefix and returns the fingerprint of the first matched error.
-It returns HTTP `404` when nothing matches or all matches are already resolved.
+`0-9`). All error operations accept a full fingerprint or a unique prefix.
+Unknown references return HTTP `404`; ambiguous prefixes return HTTP `409` without
+changing any error. Use a longer fingerprint to select exactly one error.
+`resolve` updates only that error and returns its full fingerprint; an already
+resolved error returns `404`. Silence creation also requires an existing error,
+and silence creation/removal responses report the full fingerprint.
 
-Use the full fingerprint for silence creation and removal: these operations
-store and match the exact value, without expanding prefixes.
+Earlier versions selected an arbitrary lookup match, resolved all prefix matches,
+and treated silence arguments as exact strings. Clients relying on bulk resolution
+must enumerate the intended full fingerprints and send one request per error.
+Existing silences without a corresponding error can still be deleted by their
+exact stored fingerprint from the silences list.
 
 ## Health
 
@@ -174,15 +178,15 @@ with partial context. There is no response field that lists integration errors.
 
 | Endpoint | Response fields |
 |---|---|
-| `POST resolve` | `fingerprint` (string, first matching error) and `resolved_at` (string). |
+| `POST resolve` | `fingerprint` (string, matched error) and `resolved_at` (string). |
 | `POST gc` | `deleted` (integer, number of removed occurrences) and `threshold` (string). |
 | `POST silence` | `fingerprint` (string), `status: "silenced"`, and optional `expires_at` (string). |
 | `DELETE silence` | `fingerprint` (string) and `status: "unsilenced"`. |
 | `GET silences` | Array of objects with `fingerprint` and `created_at` (strings), plus optional `expires_at` and `reason` (strings). With no active silences, the response is `null`. |
 | `POST test-email` | `status: "sent"` and `to` (string, configured recipient). |
 
-Creating a silence does not require an existing error. Removing a silence
-returns success even if no silence matched. Neither action expands a prefix.
+Creating a silence requires an existing error. Removing a silence for a known
+error returns success even if it was not silenced.
 
 ## Error status codes
 
@@ -194,12 +198,12 @@ Error bodies have the form `{"error":"message"}`.
 |---|---|
 | Ingestion (`store`, `envelope`) | `400` for a body read or payload parse error; `405` for a method other than POST; `500` for a storage failure. |
 | `top`, `recent`, `stats`, `silences` | `405` for a method other than GET; `500` for a query failure. |
-| `show` | `400` for an invalid fingerprint; `404` for a failed lookup or detail retrieval; `405` for a method other than GET. |
-| `trend`, `releases` | `400` for an invalid fingerprint; `404` for a failed fingerprint lookup; `405` for a method other than GET; `500` for a history query failure. |
-| `correlate` | `400` for an invalid fingerprint; `404` for a failed error lookup; `405` for a method other than GET. |
-| `resolve` | `400` for an invalid fingerprint; `404` for no unresolved match; `405` for a method other than POST; `500` for a storage failure. |
+| `show` | `400` for an invalid fingerprint; `404` for an unknown reference; `409` for ambiguity; `500` for retrieval failure; `405` for a method other than GET. |
+| `trend`, `releases` | `400` for an invalid fingerprint; `404` for an unknown reference; `409` for ambiguity; `405` for a method other than GET; `500` for a history query failure. |
+| `correlate` | `400` for an invalid fingerprint; `404` for an unknown reference; `409` for ambiguity; `500` for retrieval failure; `405` for a method other than GET. |
+| `resolve` | `400` for an invalid fingerprint; `404` for an unknown or already resolved error; `409` for ambiguity; `405` for a method other than POST; `500` for a storage failure. |
 | `gc` | `400` for a missing or invalid `older_than`; `405` for a method other than POST; `500` for a deletion failure. |
-| `silence` | `400` for an invalid fingerprint or duration; `405` for a method other than POST or DELETE; `500` for a storage failure. |
+| `silence` | `400` for an invalid fingerprint or duration; `404` for an unknown reference; `409` for ambiguity; `405` for a method other than POST or DELETE; `500` for a storage failure. |
 | `test-email` | `405` for a method other than POST; `502` for an SMTP send failure; `503` when notifications are not configured. |
 | Health | `503` when the database check fails. The health handler does not restrict the HTTP method. |
 

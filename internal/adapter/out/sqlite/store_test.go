@@ -232,7 +232,7 @@ func TestManualResolve(t *testing.T) {
 		t.Fatalf("store: %v", err)
 	}
 
-	rr, err := s.Resolve(result.Fingerprint[:8])
+	rr, err := s.Resolve(result.Fingerprint)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -256,7 +256,7 @@ func TestManualResolve(t *testing.T) {
 	}
 
 	// Resolving again should affect 0 rows
-	rr, err = s.Resolve(result.Fingerprint[:8])
+	rr, err = s.Resolve(result.Fingerprint)
 	if err != nil {
 		t.Fatalf("resolve again: %v", err)
 	}
