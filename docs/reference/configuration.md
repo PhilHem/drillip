@@ -75,9 +75,22 @@ Resolution summaries are sent directly, outside the new-error digest and
 cooldown. Silencing a fingerprint suppresses new-error and regression emails;
 it does not suppress a resolution summary.
 
-Notification emails have at most three send attempts, with waits of 2 and
-4 seconds before the retries. Test emails use one attempt and bypass digest
-batching and cooldown.
+### Notification delivery and shutdown
+
+New-error, digest, and resolution notifications are delivered asynchronously by
+the server. During graceful shutdown the server stops accepting new
+notifications, flushes the pending digest, and waits for accepted deliveries
+before closing the database. It allows eight seconds to drain, then cancels
+outstanding SMTP attempts and retry waits before completing shutdown.
+
+Each SMTP attempt has a five-second deadline covering connection setup, server
+greeting, TLS, and protocol exchanges. Notifications make at most three attempts
+with two- and four-second backoffs; the shutdown deadline may interrupt these.
+Test emails bypass digest batching and cooldown, make one attempt, and wait for
+its result. Failed sends are logged;
+only successful new-error/digest deliveries mark errors as notified. Notifications
+are held in memory, so forced termination or exhausted delivery attempts can lose
+them. There is no durable email outbox.
 
 ## Lifecycle
 
@@ -122,4 +135,4 @@ series; failures or exhausted budgets use `(error)` or `(timeout)`. The queries
 have no per-service selector, so use a data source appropriate to this tracker's
 scope. `cpu_seconds` is cumulative process CPU seconds, previously misleadingly
 named `cpu_usage`; the query itself is unchanged. This is not a CPU utilization
-percentage. Query-formula and selector design remain outside this change.
+percentage.

@@ -1,6 +1,7 @@
 package smtp
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/smtp"
@@ -39,7 +40,7 @@ func TestNotificationMarkedOnlyAfterDelivery(t *testing.T) {
 					})
 					t.Cleanup(n.Close)
 					attempts := 0
-					n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
+					n.sendMail = func(context.Context, string, smtp.Auth, string, []string, []byte) error {
 						attempts++
 						if attempts <= failures {
 							return errors.New("SMTP unavailable")
@@ -83,7 +84,7 @@ func TestDigestPreservesDistinctErrorsDuringCooldown(t *testing.T) {
 		})
 		t.Cleanup(n.Close)
 		var messages []string
-		n.sendMail = func(_ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
+		n.sendMail = func(_ context.Context, _ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
 			mu.Lock()
 			defer mu.Unlock()
 			messages = append(messages, string(msg))
@@ -122,7 +123,7 @@ func TestDigestWindowRespectsLongerCooldown(t *testing.T) {
 		n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", time.Minute, 10*time.Second, nil)
 		t.Cleanup(n.Close)
 		var calls atomic.Int32
-		n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
+		n.sendMail = func(context.Context, string, smtp.Auth, string, []string, []byte) error {
 			calls.Add(1)
 			return nil
 		}

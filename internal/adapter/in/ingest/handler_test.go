@@ -3,6 +3,7 @@ package ingest
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -339,7 +340,7 @@ func TestRegressionTriggersNotification(t *testing.T) {
 
 	n := notify.NewNotifier(notify.SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, nil)
 	var notified int32
-	n.SetSendMail(func(_ string, _ smtp.Auth, _ string, _ []string, _ []byte) error {
+	n.SetSendMail(func(_ context.Context, _ string, _ smtp.Auth, _ string, _ []string, _ []byte) error {
 		atomic.AddInt32(&notified, 1)
 		return nil
 	})

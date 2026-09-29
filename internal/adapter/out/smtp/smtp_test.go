@@ -1,6 +1,7 @@
 package smtp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,7 +19,7 @@ import (
 func TestNotifyResolvedSendsEmail(t *testing.T) {
 	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, nil)
 	var captured []byte
-	n.sendMail = func(_ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
+	n.sendMail = func(_ context.Context, _ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
 		captured = msg
 		return nil
 	}
@@ -29,6 +30,7 @@ func TestNotifyResolvedSendsEmail(t *testing.T) {
 	}
 
 	n.NotifyResolved(resolved)
+	n.workers.Wait()
 
 	msg := string(captured)
 	if !strings.Contains(msg, "Subject: [drillip] resolved: 2 errors in proj") {
@@ -39,13 +41,15 @@ func TestNotifyResolvedSendsEmail(t *testing.T) {
 func TestNotifyResolvedEmptyListNoSend(t *testing.T) {
 	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, nil)
 	calls := 0
-	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
+	n.sendMail = func(context.Context, string, smtp.Auth, string, []string, []byte) error {
 		calls++
 		return nil
 	}
 
 	n.NotifyResolved(nil)
+	n.workers.Wait()
 	n.NotifyResolved([]domain.ResolvedError{})
+	n.workers.Wait()
 
 	if calls != 0 {
 		t.Fatalf("expected 0 sends for empty resolved list, got %d", calls)
@@ -55,7 +59,7 @@ func TestNotifyResolvedEmptyListNoSend(t *testing.T) {
 func TestNotifyResolvedDisabledSMTP(t *testing.T) {
 	n := NewNotifier(SMTPConfig{}, "proj", 0, 0, nil)
 	calls := 0
-	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
+	n.sendMail = func(context.Context, string, smtp.Auth, string, []string, []byte) error {
 		calls++
 		return nil
 	}
@@ -131,7 +135,7 @@ func TestFormatResolvedPlainEmail(t *testing.T) {
 func TestNotifyResolvedHTMLContainsErrorDetails(t *testing.T) {
 	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, nil)
 	var captured []byte
-	n.sendMail = func(_ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
+	n.sendMail = func(_ context.Context, _ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
 		captured = msg
 		return nil
 	}
@@ -141,6 +145,7 @@ func TestNotifyResolvedHTMLContainsErrorDetails(t *testing.T) {
 	}
 
 	n.NotifyResolved(resolved)
+	n.workers.Wait()
 
 	msg := string(captured)
 	for _, want := range []string{"RuntimeError", "crash", "abcdef12"} {
@@ -367,18 +372,21 @@ func TestNotifyNoopWhenDisabled(t *testing.T) {
 	n := NewNotifier(SMTPConfig{}, "", 0, 0, nil)
 	// Should not panic or send when SMTP is disabled
 	n.NotifyNewError(ev, "abc123", false, 0)
+	n.workers.Wait()
 }
 
 func TestNewNotifierZeroCooldownSendsImmediately(t *testing.T) {
 	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, nil)
 	calls := 0
-	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
+	n.sendMail = func(context.Context, string, smtp.Auth, string, []string, []byte) error {
 		calls++
 		return nil
 	}
 	ev := &domain.Event{Message: "test"}
 	n.NotifyNewError(ev, "fp1", false, 0)
+	n.workers.Wait()
 	n.NotifyNewError(ev, "fp1", false, 0)
+	n.workers.Wait()
 	if calls != 2 {
 		t.Fatalf("expected 2 sends with zero cooldown, got %d", calls)
 	}
@@ -389,14 +397,16 @@ func TestSameFingerPrintThrottled(t *testing.T) {
 	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 10*time.Second, 0, nil)
 	n.now = func() time.Time { return now }
 	calls := 0
-	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
+	n.sendMail = func(context.Context, string, smtp.Auth, string, []string, []byte) error {
 		calls++
 		return nil
 	}
 	ev := &domain.Event{Message: "test"}
 
 	n.NotifyNewError(ev, "fp1", false, 0) // should send
+	n.workers.Wait()
 	n.NotifyNewError(ev, "fp1", false, 0) // should be throttled (same fp, within cooldown)
+	n.workers.Wait()
 
 	if calls != 1 {
 		t.Fatalf("expected 1 send (second throttled), got %d", calls)
@@ -408,17 +418,19 @@ func TestSameFingerPrintSendsAfterCooldown(t *testing.T) {
 	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 10*time.Second, 0, nil)
 	n.now = func() time.Time { return now }
 	calls := 0
-	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
+	n.sendMail = func(context.Context, string, smtp.Auth, string, []string, []byte) error {
 		calls++
 		return nil
 	}
 	ev := &domain.Event{Message: "test"}
 
 	n.NotifyNewError(ev, "fp1", false, 0) // should send
+	n.workers.Wait()
 
 	// Advance time past cooldown
 	now = now.Add(11 * time.Second)
 	n.NotifyNewError(ev, "fp1", false, 0) // should send again
+	n.workers.Wait()
 
 	if calls != 2 {
 		t.Fatalf("expected 2 sends after cooldown expired, got %d", calls)
@@ -430,14 +442,16 @@ func TestDifferentFingerprintsThrottledByGlobalCooldown(t *testing.T) {
 	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 10*time.Second, 0, nil)
 	n.now = func() time.Time { return now }
 	calls := 0
-	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
+	n.sendMail = func(context.Context, string, smtp.Auth, string, []string, []byte) error {
 		calls++
 		return nil
 	}
 	ev := &domain.Event{Message: "test"}
 
 	n.NotifyNewError(ev, "fp1", false, 0) // should send
+	n.workers.Wait()
 	n.NotifyNewError(ev, "fp2", false, 0) // different fp, but global cooldown blocks
+	n.workers.Wait()
 
 	if calls != 1 {
 		t.Fatalf("expected 1 send (fp2 blocked by global cooldown), got %d", calls)
@@ -623,7 +637,7 @@ func TestFormatPlainEmailNoRegression(t *testing.T) {
 func TestNotifyRegressionSubject(t *testing.T) {
 	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, nil)
 	var captured []byte
-	n.sendMail = func(_ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
+	n.sendMail = func(_ context.Context, _ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
 		captured = msg
 		return nil
 	}
@@ -635,6 +649,7 @@ func TestNotifyRegressionSubject(t *testing.T) {
 	}
 
 	n.NotifyNewError(ev, "fp1", true, 24*time.Hour)
+	n.workers.Wait()
 
 	msg := string(captured)
 	if !strings.Contains(msg, "Subject: [drillip] regression: TypeError") {
@@ -645,7 +660,7 @@ func TestNotifyRegressionSubject(t *testing.T) {
 func TestNotifyNewErrorSubject(t *testing.T) {
 	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, nil)
 	var captured []byte
-	n.sendMail = func(_ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
+	n.sendMail = func(_ context.Context, _ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
 		captured = msg
 		return nil
 	}
@@ -657,6 +672,7 @@ func TestNotifyNewErrorSubject(t *testing.T) {
 	}
 
 	n.NotifyNewError(ev, "fp1", false, 0)
+	n.workers.Wait()
 
 	msg := string(captured)
 	if !strings.Contains(msg, "Subject: [drillip] error: TypeError") {
@@ -692,13 +708,15 @@ func TestFormatDuration(t *testing.T) {
 func TestDigestZeroSendsImmediately(t *testing.T) {
 	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, nil)
 	calls := 0
-	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
+	n.sendMail = func(context.Context, string, smtp.Auth, string, []string, []byte) error {
 		calls++
 		return nil
 	}
 	ev := &domain.Event{Message: "test"}
 	n.NotifyNewError(ev, "fp1", false, 0)
+	n.workers.Wait()
 	n.NotifyNewError(ev, "fp2", false, 0)
+	n.workers.Wait()
 	if calls != 2 {
 		t.Fatalf("expected 2 immediate sends with digest=0, got %d", calls)
 	}
@@ -708,7 +726,7 @@ func TestDigestBatchesMultipleErrors(t *testing.T) {
 	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 5*time.Minute, nil)
 	calls := 0
 	var captured []byte
-	n.sendMail = func(_ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
+	n.sendMail = func(_ context.Context, _ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
 		calls++
 		captured = msg
 		return nil
@@ -731,8 +749,11 @@ func TestDigestBatchesMultipleErrors(t *testing.T) {
 	}
 
 	n.NotifyNewError(ev1, "fp100001abcdef00", false, 0)
+	n.workers.Wait()
 	n.NotifyNewError(ev2, "fp200002abcdef00", false, 0)
+	n.workers.Wait()
 	n.NotifyNewError(ev3, "fp300003abcdef00", true, 48*time.Hour)
+	n.workers.Wait()
 
 	// No email sent yet — buffered
 	if calls != 0 {
@@ -741,6 +762,7 @@ func TestDigestBatchesMultipleErrors(t *testing.T) {
 
 	// Manually flush
 	n.flush()
+	n.workers.Wait()
 
 	if calls != 1 {
 		t.Fatalf("expected 1 digest send after flush, got %d", calls)
@@ -756,7 +778,7 @@ func TestDigestSingleItemSendsIndividualEmail(t *testing.T) {
 	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 5*time.Minute, nil)
 	calls := 0
 	var captured []byte
-	n.sendMail = func(_ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
+	n.sendMail = func(_ context.Context, _ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
 		calls++
 		captured = msg
 		return nil
@@ -769,9 +791,11 @@ func TestDigestSingleItemSendsIndividualEmail(t *testing.T) {
 	}
 
 	n.NotifyNewError(ev, "fp100001abcdef00", false, 0)
+	n.workers.Wait()
 
 	// Flush with single pending item -> should send individual email, not digest
 	n.flush()
+	n.workers.Wait()
 
 	if calls != 1 {
 		t.Fatalf("expected 1 send, got %d", calls)
@@ -789,13 +813,16 @@ func TestDigestSingleItemSendsIndividualEmail(t *testing.T) {
 
 func TestFlushClearsPending(t *testing.T) {
 	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 5*time.Minute, nil)
-	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error { return nil }
+	n.sendMail = func(context.Context, string, smtp.Auth, string, []string, []byte) error { return nil }
 
 	ev := &domain.Event{Message: "test"}
 	n.NotifyNewError(ev, "fp1", false, 0)
+	n.workers.Wait()
 	n.NotifyNewError(ev, "fp2", false, 0)
+	n.workers.Wait()
 
 	n.flush()
+	n.workers.Wait()
 
 	n.mu.Lock()
 	pending := len(n.pending)
@@ -807,11 +834,12 @@ func TestFlushClearsPending(t *testing.T) {
 
 	// Second flush should not send
 	calls := 0
-	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
+	n.sendMail = func(context.Context, string, smtp.Auth, string, []string, []byte) error {
 		calls++
 		return nil
 	}
 	n.flush()
+	n.workers.Wait()
 	if calls != 0 {
 		t.Fatalf("expected 0 sends on second flush, got %d", calls)
 	}
@@ -820,14 +848,16 @@ func TestFlushClearsPending(t *testing.T) {
 func TestCloseFlushes(t *testing.T) {
 	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 5*time.Minute, nil)
 	calls := 0
-	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
+	n.sendMail = func(context.Context, string, smtp.Auth, string, []string, []byte) error {
 		calls++
 		return nil
 	}
 
 	ev := &domain.Event{Message: "test"}
 	n.NotifyNewError(ev, "fp1", false, 0)
+	n.workers.Wait()
 	n.NotifyNewError(ev, "fp2", false, 0)
+	n.workers.Wait()
 
 	n.Close()
 
@@ -988,12 +1018,13 @@ func TestSMTPHeaderInjection(t *testing.T) {
 
 	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, nil)
 	var captured []byte
-	n.sendMail = func(_ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
+	n.sendMail = func(_ context.Context, _ string, _ smtp.Auth, _ string, _ []string, msg []byte) error {
 		captured = msg
 		return nil
 	}
 
 	n.NotifyNewError(ev, "fp1", false, 0)
+	n.workers.Wait()
 
 	msg := string(captured)
 
@@ -1026,7 +1057,7 @@ func TestNotifierConcurrentSafety(t *testing.T) {
 	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, nil)
 	var mu sync.Mutex
 	sendCount := 0
-	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
+	n.sendMail = func(context.Context, string, smtp.Auth, string, []string, []byte) error {
 		mu.Lock()
 		sendCount++
 		mu.Unlock()
@@ -1054,6 +1085,7 @@ func TestNotifierConcurrentSafety(t *testing.T) {
 		<-done
 	}
 
+	n.Close()
 	mu.Lock()
 	got := sendCount
 	mu.Unlock()
@@ -1066,13 +1098,14 @@ func TestNotifierConcurrentSafety(t *testing.T) {
 func TestDigestTimerFires(t *testing.T) {
 	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 10*time.Millisecond, nil)
 	calls := make(chan int, 1)
-	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
+	n.sendMail = func(context.Context, string, smtp.Auth, string, []string, []byte) error {
 		calls <- 1
 		return nil
 	}
 
 	ev := &domain.Event{Message: "test"}
 	n.NotifyNewError(ev, "fp1", false, 0)
+	n.workers.Wait()
 
 	// Wait for timer to fire
 	select {
@@ -1086,7 +1119,7 @@ func TestDigestTimerFires(t *testing.T) {
 func TestSendRetriesOnError(t *testing.T) {
 	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, nil)
 	attempts := 0
-	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
+	n.sendMail = func(context.Context, string, smtp.Auth, string, []string, []byte) error {
 		attempts++
 		return errors.New("connection refused")
 	}
@@ -1103,7 +1136,7 @@ func TestSendRetriesOnError(t *testing.T) {
 func TestSendSucceedsOnSecondAttempt(t *testing.T) {
 	n := NewNotifier(SMTPConfig{Host: "localhost", To: "a@b.com", From: "x@y.com"}, "proj", 0, 0, nil)
 	attempts := 0
-	n.sendMail = func(string, smtp.Auth, string, []string, []byte) error {
+	n.sendMail = func(context.Context, string, smtp.Auth, string, []string, []byte) error {
 		attempts++
 		if attempts < 2 {
 			return errors.New("temporary failure")

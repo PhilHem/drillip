@@ -6,12 +6,14 @@ import (
 	"github.com/PhilHem/drillip/internal/domain"
 )
 
-// ResolutionNotifier delivers resolved-error notifications.
+// ResolutionNotifier accepts resolved-error notifications before returning.
+// Implementations own asynchronous delivery and its shutdown lifecycle.
 type ResolutionNotifier interface {
 	NotifyResolved([]domain.ResolvedError)
 }
 
-// Notifier delivers application notifications through a configured channel.
+// Notifier accepts application notifications before returning.
+// Delivery is asynchronous; SendTestEmail waits for its result.
 type Notifier interface {
 	ResolutionNotifier
 	NotifyNewError(*domain.Event, string, bool, time.Duration)
