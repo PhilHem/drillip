@@ -1,8 +1,8 @@
 # Application architecture
 
 Drillip separates application behavior from the protocols, storage, and
-external services that deliver it. HTTP handlers and CLI commands use the
-same application services. Those services coordinate domain models through
+external services that deliver it. HTTP handlers use application services. Normal CLI commands reach those services
+through the HTTP client; explicit local maintenance uses them directly. Those services coordinate domain models through
 explicit port interfaces.
 
 The directories identify each part's role:
@@ -19,6 +19,8 @@ internal/
     in/api/                     JSON HTTP API
     in/ingest/                  Sentry HTTP protocol
     in/cli/                     command parsing and output
+    httpwire/                   shared command API representations
+    out/httpclient/             remote application operations for the CLI
     out/sqlite/                 storage and migrations
     out/smtp/                   email delivery and formatting
     out/observability/          journalctl, VictoriaMetrics, VictoriaTraces, Pyroscope
@@ -58,8 +60,10 @@ The permitted dependencies between layers are:
 | Inbound ports | Domain |
 | Outbound ports | Domain |
 | Application services | Domain, inbound ports, outbound ports |
-| Inbound adapters | Domain, inbound ports |
+| Inbound adapters | Domain, inbound ports, HTTP wire representations |
 | Outbound adapters | Domain, outbound ports |
+| HTTP client | Domain, inbound ports, HTTP wire representations |
+| HTTP wire representations | Domain |
 | Bootstrap | All application layers |
 
 Calling an interface at runtime does not require importing its concrete
@@ -71,11 +75,19 @@ concrete adapters and services to check their behavior together.
 
 `bootstrap` reads configuration, constructs the concrete dependencies, and
 connects them to services and adapters. It also runs the server lifecycle and
-dispatches CLI commands. Normal `resolve` sends its request to the running
-server so the server owns notification policy. Explicit `--offline resolve` uses
-the local application service without a notifier. Other database commands retain
-their direct local access. Constructing the application requires access to all
-layers, so this wiring has its own package.
+dispatches CLI commands. Parsing produces a validated invocation before any
+backend is connected. Normal commands use one HTTP client implementing the
+application operations; the server owns storage, notification, and telemetry
+policy. Explicit maintenance opens the selected existing database and constructs
+the application without a notifier or telemetry adapter.
+
+The HTTP client accepts context on each operation and encapsulates target URLs,
+query encoding, compatibility checks, deadlines, status errors, and response
+validation. Shared wire representations keep client and handler field names
+aligned. Its inbound-port dependency is deliberate: it is a remote implementation
+of the operations consumed by the CLI, not a repository used by the server.
+Application services reject already-cancelled contexts before storage access;
+synchronous repository calls are not yet interruptible through these ports.
 
 The root `main.go` handles process signals and exit status and delegates to
 bootstrap. Keeping the executable at the repository root preserves the

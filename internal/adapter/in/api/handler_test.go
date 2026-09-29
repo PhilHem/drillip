@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"github.com/PhilHem/drillip/internal/adapter/httpwire"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -45,7 +46,7 @@ func TestAPITop(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
-	var results []apiError
+	var results []httpwire.Error
 	if err := json.Unmarshal(w.Body.Bytes(), &results); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -79,7 +80,7 @@ func TestAPITopWithTagFilter(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.HandleTop(w, req)
 
-	var results []apiError
+	var results []httpwire.Error
 	if err := json.Unmarshal(w.Body.Bytes(), &results); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -108,7 +109,7 @@ func TestAPIShow(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	var detail apiErrorDetail
+	var detail httpwire.ErrorDetail
 	if err := json.Unmarshal(w.Body.Bytes(), &detail); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -147,7 +148,7 @@ func TestAPIStats(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
-	var stats apiStats
+	var stats httpwire.Stats
 	if err := json.Unmarshal(w.Body.Bytes(), &stats); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -178,7 +179,7 @@ func TestAPIRecent(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
-	var results []apiError
+	var results []httpwire.Error
 	if err := json.Unmarshal(w.Body.Bytes(), &results); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -245,7 +246,7 @@ func TestAPIReleases(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 
-	var releases []apiRelease
+	var releases []httpwire.Release
 	if err := json.Unmarshal(result["releases"], &releases); err != nil {
 		t.Fatalf("parse releases: %v", err)
 	}
@@ -281,7 +282,7 @@ func TestAPIGC(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	var result apiGCResult
+	var result httpwire.GCResult
 	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -430,7 +431,7 @@ func TestAPIListSilences(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var results []apiSilence
+	var results []httpwire.Silence
 	if err := json.Unmarshal(w.Body.Bytes(), &results); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -494,7 +495,7 @@ func TestAPITopIncludesState(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.HandleTop(w, req)
 
-	var results []apiError
+	var results []httpwire.Error
 	if err := json.Unmarshal(w.Body.Bytes(), &results); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -524,7 +525,7 @@ func TestAPIShowIncludesState(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.HandleShow(w, req)
 
-	var detail apiErrorDetail
+	var detail httpwire.ErrorDetail
 	if err := json.Unmarshal(w.Body.Bytes(), &detail); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -558,7 +559,7 @@ func TestAPICorrelate(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	var result apiCorrelation
+	var result httpwire.Correlation
 	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -614,7 +615,7 @@ func TestAPICorrelateWithNth(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
-	var result apiCorrelation
+	var result httpwire.Correlation
 	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
 		t.Fatalf("parse: %v", err)
 	}

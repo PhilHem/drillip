@@ -26,7 +26,7 @@ Events are sanitized at ingest: oversized fields are truncated, invalid levels n
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/0/top/` | Up to 25 errors sorted by occurrence count |
+| `GET` | `/api/0/top/` | Errors sorted by occurrence count; `limit` defaults to 25 |
 | `GET` | `/api/0/recent/?hours=1` | Errors first seen within the last N hours (max 8760) |
 | `GET` | `/api/0/show/<fp>/` | Error detail with tag distribution |
 | `GET` | `/api/0/trend/<fp>/` | Hourly occurrence histogram (24h) |
@@ -60,15 +60,35 @@ integrations can leave sections absent.
 | `GET` | `/api/0/silences/` | List active silences |
 | `POST` | `/api/0/test-email/` | Send a test email to verify SMTP configuration |
 
-`older_than` is required for garbage collection. It and the optional silence
+`older_than` or absolute `before` is required for garbage collection. `older_than` and the optional silence
 `duration` accept a whole number followed by `h`, `d`, or `w`, such as `24h`,
-`30d`, or `2w`. A silence without `duration` does not expire. The optional
+`30d`, or `2w`. A silence without `duration` or `expires_at` does not expire. The optional
 `reason` is truncated to 500 bytes. URL-encode query parameter values.
 
 The test-email endpoint returns `{"status":"sent","to":"<recipient>"}`
 when SMTP accepts the message, HTTP `503` when notifications are not configured,
 and HTTP `502` when sending fails. See the
 [email setup guide](../how-to/email-notifications.md) for a complete check.
+
+## Command API compatibility and exact times
+
+`GET /api/0/capabilities/` returns `{"command_api":1}`. Version 1 promises:
+
+- `top?limit=N` accepts a positive limit; list entries include `first_seen`.
+- `recent?since=TIMESTAMP` and `trend/<fp>/?since=TIMESTAMP` accept absolute start times.
+- `gc?before=TIMESTAMP` accepts an absolute deletion cutoff.
+- `silence/<fp>/?expires_at=TIMESTAMP` accepts an absolute expiry and returns
+  the actual applied `expires_at` (UTC, whole-second storage precision).
+
+Absolute timestamps use RFC3339, including optional fractional seconds and offsets;
+URL-encode them. They reach application operations without conversion to rounded
+hour/day durations. Existing SQLite comparisons and stored times use whole seconds.
+Using both `since` and `hours`, `before` and `older_than`, or `expires_at` and
+`duration` fails with HTTP 400. Malformed absolute timestamps also fail with 400.
+Existing relative parameters retain their behavior.
+
+The command client checks this contract before each operation and rejects older
+servers before mutating state. Health probes remain independently usable.
 
 ## Fingerprints
 

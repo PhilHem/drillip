@@ -1,37 +1,44 @@
 # CLI reference
 
-The same binary runs the HTTP server and provides commands for investigation
-and maintenance. With no command, `drillip` starts the server, as does
-`drillip serve`.
+The same binary runs the server and provides investigation and management
+commands. Normal commands use one HTTP or HTTPS server; they do not open a local
+database or read local SMTP/observability settings. The server owns those policies.
+With no command, `drillip` starts the server, as does `drillip serve`.
 
-`resolve` and `health` call the configured server over HTTP. Normal resolution
-therefore uses the server's notification policy and does not need database access
-or SMTP configuration in the CLI process. Other investigation and maintenance
-commands open SQLite directly and need access to the same database as the server.
-
-## Invocation and global options
+## Invocation and options
 
 ```text
-drillip [--db <path>] [--addr <host:port>] [--offline] <command> [arguments]
+drillip [--server <URL>] <command> [arguments]
+drillip serve [--listen <host:port>] [--db <path>]
+drillip maintenance --db <existing-path> <command> [arguments]
 ```
 
 | Option | Effect |
 |---|---|
-| `--db <path>` | Override `DRILLIP_DB` with a non-empty database path. |
-| `--addr <host:port>` | Override `DRILLIP_ADDR` with a non-empty server listen address or HTTP command target. |
-| `--offline` | With `resolve` only: update SQLite directly without notifications. |
-| `--help` | Print global option help. |
+| `--server <URL>` | Client target; HTTP or HTTPS, optionally with a path prefix. Overrides `DRILLIP_SERVER`. |
+| `serve --listen <host:port>` | Server bind address; overrides `DRILLIP_ADDR`. |
+| `serve --db <path>` | Server SQLite path; overrides `DRILLIP_DB`. |
+| `maintenance --db <path>` | Explicit existing local database; no environment fallback. |
+| `--help`, `<command> --help` | Print help without opening a database or contacting a server. |
 
-Put global options before the command. Put command options before positional
-arguments, including the fingerprint. For example:
+Put `--server` before the command, and command options before positional
+arguments. For example:
 
 ```sh
-drillip --db /data/errors.db correlate --nth 2 04827c
-drillip --db /data/errors.db silence --reason "planned maintenance" 04827c0123456789 24h
+drillip --server http://127.0.0.1:8300 correlate --nth 2 04827c
+drillip --server http://127.0.0.1:8300 silence --reason "planned maintenance" 04827c 24h
+drillip serve --listen 127.0.0.1:8300 --db /data/errors.db
 ```
 
-Environment variables and defaults are listed in the
-[configuration reference](configuration.md).
+The default client target is `http://127.0.0.1:8300`. For compatibility, an explicit
+legacy `--addr <host:port>` still selects an HTTP target and overrides environment
+settings. `--server` and `--addr` together are rejected. If neither explicit flag
+nor `DRILLIP_SERVER` is set, a nonempty `DRILLIP_ADDR` remains the legacy HTTP
+target; wildcard bind addresses map to loopback. This preserves existing health
+checks and prevents old configurations from silently selecting another server.
+Prefer `--server` or `DRILLIP_SERVER` for new client configurations.
+
+Environment variables are listed in the [configuration reference](configuration.md).
 
 Successful commands, including help and empty result lists, exit with status 0.
 Invalid arguments, failed lookups, and failed operations exit with status 1 and
@@ -47,11 +54,11 @@ arguments. Do not type the brackets.
 | Syntax | Effect |
 |---|---|
 | `drillip serve` | Start the HTTP server and background maintenance. |
-| `drillip top [--level <level>] [--tag <key=value>] [--limit <n>]` | List errors by total occurrence count; default limit `10`. |
-| `drillip recent [--hours <n>] [--level <level>] [--tag <key=value>]` | List errors first seen within the last N hours; default `1`. |
+| `drillip top [--level <level>] [--tag <key=value>] [--limit <n>]` | List errors by total occurrence count; default limit `10`; must be positive. |
+| `drillip recent [--hours <n>] [--level <level>] [--tag <key=value>]` | List errors first seen within the last N hours; default `1`, range `1–8760`. |
 | `drillip show <fingerprint>` | Show error details, stacktrace, and tag distribution. |
 | `drillip trend <fingerprint>` | Show the hourly occurrence histogram for the last 24 hours. |
-| `drillip correlate [--nth <n>] <fingerprint>` | Show error context for the Nth most recent occurrence; default `1`. |
+| `drillip correlate [--nth <n>] <fingerprint>` | Show error context for the Nth most recent occurrence; default `1`, must be positive. |
 | `drillip releases <fingerprint>` | Show retained occurrence counts by release. |
 | `drillip stats` | Show the number of grouped errors and retained occurrences. |
 | `drillip gc <duration>` | Delete occurrences older than the duration. |
@@ -61,50 +68,60 @@ arguments. Do not type the brackets.
 | `drillip unsilence <fingerprint>` | Remove silences for the uniquely identified error. |
 | `drillip health` | Call `/-/healthy` at the configured address; print `ok` on HTTP `200`, with a two-second request deadline. |
 
-The health target uses loopback when the configured listen address is a wildcard
-(`0.0.0.0`, `::`, or an empty host). The health command does not open SQLite.
-The two-second deadline applies to builds containing this change; the example
-image pinned to v0.3.14 has the command but no built-in deadline. Its startup
-wrapper bounds each invocation separately.
+Normal commands have a ten-second deadline covering compatibility checking and
+the operation. `health` has a two-second deadline and does not need the command
+API compatibility check. Failures never fall back to a database, follow redirects,
+or automatically retry mutations. A connection failure after submission may mean
+the server already changed state; inspect the state before retrying.
 
-`--level` filters by severity, for example `error` or `warning`. `--tag`
-filters by one `key=value` pair. Durations for `gc` and `silence` are whole
-numbers followed by `h`, `d`, or `w`, for example `24h`, `30d`, or `2w`.
+`--level` filters by severity; `--tag` accepts `key=value`. Durations for `gc` and
+`silence` are whole numbers followed by `h`, `d`, or `w`. `correlate --nth` must
+be positive. CLI `recent --hours` accepts 1–8760. Silence output reports the expiry
+applied by the server, using the database's whole-second timestamp precision.
 
-`correlate` includes available data from the configured
-[observability integrations](configuration.md#integrations-for-correlate).
+## Local maintenance
 
-## Resolve online or offline
-
-Normally, use:
-
-```sh
-drillip --addr 127.0.0.1:8300 resolve 04827c
-```
-
-The command calls the same HTTP action as other API clients, with a ten-second
-request deadline, and prints the resolved full fingerprint. Success confirms the
-state change, not SMTP delivery. The server owns notification configuration and
-retries. A failed request never falls back to a local database update. If the
-connection fails after submission, inspect the error's state before retrying;
-the server may already have applied the change.
-
-For deliberate offline maintenance, use:
+Use explicit maintenance when the server is unavailable and you deliberately
+want direct access to its existing database:
 
 ```sh
-drillip --offline --db /data/errors.db resolve 04827c
+drillip maintenance --db /data/errors.db show 04827c
+drillip maintenance --db /data/errors.db resolve 04827c
 ```
 
-This updates SQLite without contacting a server or sending notifications. There
-is no notification queued for later delivery. `--offline` is rejected for other
-commands, and passing `--db` to online `resolve` is rejected to prevent accidentally
-resolving an error on a different server.
+Maintenance supports the same investigation and management commands, except
+`health`. It never sends HTTP requests or email, and does not queue notifications
+for later delivery. Correlation includes stored context only; remote telemetry
+and journal lookups are disabled. Missing database files are rejected to avoid
+silently creating the wrong database. A configured `DRILLIP_SERVER` or
+`DRILLIP_DB` does not change an explicit maintenance invocation. Explicit global
+server/database flags are rejected with maintenance.
 
-Earlier versions always resolved locally without email. To retain that behavior,
-add `--offline` before the command. Upgrade the server together with the CLI to
-use the same reference and notification contracts; older servers retain their
-previous prefix semantics. The pinned v0.3.14 tutorial image retains its older
-local resolution behavior until its Drillip version is upgraded.
+Normal `resolve` confirms the state change, not SMTP delivery. The running server
+owns notification configuration and delivery retries.
+
+## Upgrade from earlier CLI versions
+
+Upgrade the server together with the CLI. Before each normal API operation, the
+client checks `GET /api/0/capabilities/` for command API version 1. An older server
+fails this check before any mutation; in particular it cannot silently ignore a
+new silence expiry parameter. Direct HTTP clients may continue using the existing
+API endpoints and duration parameters.
+
+| Earlier invocation | Current invocation |
+|---|---|
+| `drillip --db /data/errors.db show 04827c` | `drillip --server http://127.0.0.1:8300 show 04827c`, or explicit `maintenance --db /data/errors.db show 04827c` |
+| `drillip --offline --db /data/errors.db resolve 04827c` | `drillip maintenance --db /data/errors.db resolve 04827c` |
+| `drillip --addr 0.0.0.0:8300 --db /data/errors.db serve` | `drillip serve --listen 0.0.0.0:8300 --db /data/errors.db` |
+
+`--offline` now fails with migration instructions. Global `--db` remains a legacy
+server-start option and is rejected for normal commands. `DRILLIP_DB` does not
+select local command execution. New normal commands require a running server;
+use maintenance for deliberate local access.
+
+The Python tutorial remains pinned to v0.3.14 and therefore retains that release's
+CLI semantics. Build its example with a current Drillip image to exercise this
+contract; see [the tutorial](../tutorials/python-container.md#build-and-start-the-service).
 
 ## Fingerprints
 

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"testing"
@@ -117,7 +118,7 @@ func TestResolveNotifiesOnlyAfterSuccessfulChange(t *testing.T) {
 	for _, storeErr := range []error{nil, errors.New("transaction failed")} {
 		repo := &eventRepository{resolved: domain.ResolveResult{Matched: 1, Resolved: resolved}, err: storeErr}
 		notifier := &notificationRecorder{resolved: make(chan []domain.ResolvedError, 1)}
-		_, err := New(repo, notifier, nil).Resolve("1234")
+		_, err := New(repo, notifier, nil).Resolve(context.Background(), "1234")
 		if !errors.Is(err, storeErr) {
 			t.Fatalf("error = %v, want %v", err, storeErr)
 		}

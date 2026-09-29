@@ -1,6 +1,9 @@
 package inport
 
-import "github.com/PhilHem/drillip/internal/domain"
+import (
+	"context"
+	"github.com/PhilHem/drillip/internal/domain"
+)
 
 // CorrelateQuery identifies an error and the occurrence to investigate.
 type CorrelateQuery struct {
@@ -12,5 +15,5 @@ type CorrelateQuery struct {
 // Error lookup failures are returned. An unavailable occurrence or telemetry
 // source leaves that part of the result empty without losing the error data.
 type Correlator interface {
-	Correlate(CorrelateQuery) (*domain.Correlation, error)
+	Correlate(context.Context, CorrelateQuery) (*domain.Correlation, error)
 }
