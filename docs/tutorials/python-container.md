@@ -4,38 +4,37 @@ In this tutorial, you will build one image containing a small Python HTTP servic
 and Drillip, capture an exception, and keep the recorded error across container
 replacement. Supervisor manages both processes. Only the Python port is published.
 
-You need Docker, `curl`, a checkout of this repository, and a free host port 18000.
-Run the commands from the repository root. The pinned Drillip image used here
+You need Docker with Compose v2, `curl`, a checkout of this repository, and a free
+host port 18000. Start from the repository root. The pinned Drillip image used here
 provides an amd64 binary, so Docker needs native amd64 support or emulation.
-Use unused container and volume names: this tutorial deletes its data at the end.
+Use an unused Compose project named `drillip-python`: this tutorial deletes its
+data at the end.
 
 ## Build and start the service
 
-Build the [example](../../examples/python-container/Dockerfile):
+Build and start the [example](../../examples/python-container/Dockerfile) using
+its [Compose file](../../examples/python-container/compose.yaml):
 
 ```bash
-docker build --platform linux/amd64 -t drillip-python-example examples/python-container
-docker volume create drillip-python-data
-docker run --detach --platform linux/amd64 --name drillip-python \
-  --publish 127.0.0.1:18000:8000 \
-  --mount type=volume,source=drillip-python-data,target=/var/lib/drillip \
-  drillip-python-example
+cd examples/python-container
+docker compose up --build --wait --wait-timeout 60
 ```
 
-Check the container's health:
+Compose creates one container and a database volume, then waits for the service
+to become healthy. Keep this directory for the remaining commands. Check its state:
 
 ```bash
-docker inspect --format '{{.State.Health.Status}}' drillip-python
+docker compose ps
 ```
 
-Repeat until the output is `healthy`, normally within 15 seconds. If it becomes
-`unhealthy`, inspect `docker logs drillip-python` before continuing.
+Expect one `app` service with status `healthy`. If startup fails, inspect
+`docker compose logs` before continuing.
 
 Container health describes the Python service. Confirm that the embedded tracker
 is ready too:
 
 ```bash
-docker exec drillip-python python /app/healthcheck.py drillip
+docker compose exec app python /app/healthcheck.py drillip
 ```
 
 Expect `drillip: ok`. If the probe reports `drillip: unavailable`, inspect the
@@ -65,7 +64,7 @@ Expect HTTP 500 and a JSON response containing `Example checkout failed` and an
 to confirm that it received the event:
 
 ```bash
-docker exec drillip-python drillip top
+docker compose exec app drillip top
 ```
 
 Repeat the command after a moment if the list is still empty. You will see a
@@ -81,29 +80,25 @@ Both events came from the same exception location, so Drillip grouped them.
 Stop and remove the container:
 
 ```bash
-docker stop --time 40 drillip-python
-docker rm drillip-python
+docker compose down
 ```
 
 Supervisor stops Python first. Python closes its Sentry client with up to five
 seconds to send queued events while Drillip is still running. Supervisor then
-stops Drillip. The 40-second Docker timeout accommodates both processes' stop
-budgets.
+stops Drillip. The Compose file sets a 40-second stop grace period for both
+processes' stop budgets, so the stop command needs no timeout flag.
+`down` preserves the database volume unless you request volume removal.
 
 Start a replacement using the same volume:
 
 ```bash
-docker run --detach --platform linux/amd64 --name drillip-python \
-  --publish 127.0.0.1:18000:8000 \
-  --mount type=volume,source=drillip-python-data,target=/var/lib/drillip \
-  drillip-python-example
-docker inspect --format '{{.State.Health.Status}}' drillip-python
+docker compose up --wait --wait-timeout 60
 ```
 
 Once health is `healthy`, check the errors:
 
 ```bash
-docker exec drillip-python drillip top
+docker compose exec app drillip top
 ```
 
 The recorded error still has a count of 2. The SQLite database belongs to the
@@ -111,12 +106,10 @@ volume and survives replacement of the container.
 
 ## Clean up
 
-These commands remove the tutorial container and permanently delete its error data:
+This command removes the tutorial container and permanently deletes its error data:
 
 ```bash
-docker stop --time 40 drillip-python
-docker rm drillip-python
-docker volume rm drillip-python-data
+docker compose down --volumes
 ```
 
 To apply this pattern to your own application, use

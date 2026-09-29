@@ -28,6 +28,33 @@ For a Python image, install the example's pinned
 and checks for your service. Other runtimes can use their existing process
 manager with the same startup and shutdown behavior.
 
+## Keep deployment settings together
+
+Copy the example's [Compose file](../../examples/python-container/compose.yaml)
+beside your Dockerfile. It defines one application container with embedded
+Drillip, a persistent named volume, the published application port, and a
+40-second stop grace period. Adapt the build context and application port to your
+image; keep the volume mounted at the configured database directory.
+
+From the directory containing that file, run:
+
+```bash
+docker compose up --build --wait --wait-timeout 60
+docker compose exec app drillip top
+docker compose down
+```
+
+`down` preserves the database volume; `down --volumes` deletes it. The example
+publishes port 18000 on host loopback. Set `APP_PORT` to choose another host port,
+and use `--project-name` consistently if you need multiple independent deployments.
+For example, this starts a separate project:
+
+```bash
+APP_PORT=18001 docker compose --project-name my-service up --build --wait --wait-timeout 60
+```
+
+The remaining commands assume the supplied Compose project and its `app` service.
+
 ## Configure storage and connectivity
 
 Set these environment variables in your image or deployment:
@@ -44,7 +71,7 @@ make the host directory writable by the container's configured user before
 starting it. Give each replica its own database volume; do not share one database
 file between multiple Drillip servers.
 
-Publish only your application's port. Use `docker exec <container> drillip top`
+Publish only your application's port. Use `docker compose exec app drillip top`
 to query the embedded tracker. Set other `DRILLIP_*` variables as usual; see
 [configuration](../reference/configuration.md) and
 [email setup](email-notifications.md).
@@ -74,8 +101,11 @@ copying the example's main-process handler alone does not establish that behavio
 
 Keep enough time for both processes to stop. The example allows ten seconds for
 Python and twenty for Drillip, and uses `docker stop --time 40`. Configure the
-equivalent grace period in your deployment. Increase the application's budget
-and the total grace period together if requests take longer. `stopasgroup` and
+equivalent grace period in your deployment. The supplied Compose file already
+sets [`stop_grace_period: 40s`](https://docs.docker.com/reference/compose-file/services/#stop_grace_period),
+which applies to `docker compose stop` and `docker compose down`.
+Increase the application's budget and the total grace period together if requests
+take longer. `stopasgroup` and
 `killasgroup` ensure child processes receive the stop and, if necessary, kill
 signals. Forced termination can still lose queued events.
 
@@ -89,7 +119,7 @@ makes the container `unhealthy` independently of Drillip's state.
 Check Drillip separately with the same probe's `drillip` target:
 
 ```bash
-docker exec drillip-python python /app/healthcheck.py drillip
+docker compose exec app python /app/healthcheck.py drillip
 ```
 
 It queries Drillip's `/-/healthy` endpoint and prints `drillip: ok` with exit code
@@ -101,16 +131,16 @@ Docker alone does not restart a container merely because its healthcheck fails.
 Inspect both processes and their shared logs:
 
 ```bash
-docker exec drillip-python supervisorctl -c /app/supervisord.conf status
-docker logs drillip-python
-docker inspect --format '{{.State.Health.Status}}' drillip-python
+docker compose exec app supervisorctl -c /app/supervisord.conf status
+docker compose logs
+docker compose ps
 ```
 
 After fixing a runtime cause, such as volume permissions, start a stopped or
 `FATAL` tracker with:
 
 ```bash
-docker exec drillip-python supervisorctl -c /app/supervisord.conf start drillip
+docker compose exec app supervisorctl -c /app/supervisord.conf start drillip
 ```
 
 For image or environment changes, replace the container and retain its volume.
@@ -124,7 +154,9 @@ From the repository root, test the unchanged example with:
 ```bash
 docker build --platform linux/amd64 -t drillip-python-example examples/python-container
 python3 examples/python-container/smoke_test.py
+python3 examples/python-container/compose_smoke_test.py
 ```
 
-The test creates and removes its own container and volume. It checks capture,
-process restarts, degraded operation, ordered shutdown, and persistence.
+The tests create and remove their own containers and volumes. They check capture,
+process restarts, degraded operation, ordered shutdown, persistence, and the
+Compose deployment's configured stop grace period.

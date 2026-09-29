@@ -15,6 +15,8 @@ jobs:
         run: docker build --platform linux/amd64 -t drillip-python-example examples/python-container
       - name: Exercise capture and process lifecycle
         run: python3 examples/python-container/smoke_test.py
+      - name: Exercise Compose deployment
+        run: python3 examples/python-container/compose_smoke_test.py
 
   test:
     runs-on: ubuntu-latest
