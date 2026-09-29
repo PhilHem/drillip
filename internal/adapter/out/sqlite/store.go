@@ -299,7 +299,7 @@ func (s *Store) AutoResolve(olderThan time.Duration) ([]domain.ResolvedError, er
 
 // GCOccurrences deletes occurrence rows older than the given threshold.
 func (s *Store) GCOccurrences(before time.Time) (int64, error) {
-	res, err := s.db.Exec("DELETE FROM occurrences WHERE timestamp < ?", before.Format(time.RFC3339))
+	res, err := s.db.Exec("DELETE FROM occurrences WHERE timestamp < ?", before.UTC().Format(time.RFC3339))
 	if err != nil {
 		return 0, err
 	}

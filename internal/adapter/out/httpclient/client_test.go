@@ -105,6 +105,11 @@ func TestClientRoundTripsRealCommandAPI(t *testing.T) {
 	if st, err := client.GetStats(ctx); err != nil || st.UniqueErrors != 3 {
 		t.Fatalf("stats=%+v err=%v", st, err)
 	}
+	// A past instant remains past even when its printed local clock is ahead of UTC.
+	pastOffset := time.Now().Add(-time.Hour).In(time.FixedZone("plus12", 12*60*60))
+	if deleted, err := client.GCOccurrences(ctx, pastOffset); err != nil || deleted != 0 {
+		t.Fatalf("offset gc=%d err=%v", deleted, err)
+	}
 	if deleted, err := client.GCOccurrences(ctx, time.Now().Add(time.Hour)); err != nil || deleted != 3 {
 		t.Fatalf("gc=%d err=%v", deleted, err)
 	}
