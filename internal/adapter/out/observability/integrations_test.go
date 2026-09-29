@@ -1,9 +1,11 @@
 package observability
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 )
@@ -99,21 +101,59 @@ func TestQueryVictoriaMetricsEmptyURL(t *testing.T) {
 }
 
 func TestQueryVictoriaMetricsMock(t *testing.T) {
+	ts := time.Unix(1234567890, 0)
+	queries := map[string]string{
+		`rate(http_requests_total{status=~"5.."}[5m])`:                             "0.42",
+		`histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))`: "0.9",
+		`process_cpu_seconds_total`:                                                "123",
+		`process_resident_memory_bytes / 1024 / 1024`:                              "64",
+	}
+	var mu sync.Mutex
+	seen := make(map[string]int)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/query" {
+			t.Errorf("unexpected path: %q", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("time"); got != "1234567890" {
+			t.Errorf("unexpected query time: %q", got)
+		}
+		query := r.URL.Query().Get("query")
+		value, ok := queries[query]
+		if !ok {
+			t.Errorf("unexpected decoded query: %q", query)
+			http.Error(w, "unknown query", http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		seen[query]++
+		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{"result":[{"value":[1234567890,"0.42"]}]}}`))
+		_, _ = fmt.Fprintf(w, `{"data":{"result":[{"value":[1234567890,%q]}]}}`, value)
 	}))
 	defer srv.Close()
 
-	snap, err := QueryVictoriaMetrics(srv.URL, time.Now())
+	snap, err := QueryVictoriaMetrics(srv.URL+"/", ts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if snap == nil {
 		t.Fatal("expected snapshot")
 	}
-	if len(snap.Values) == 0 {
-		t.Fatal("expected some values")
+	want := map[string]string{"error_rate": "0.42", "p99_latency": "0.9", "cpu_usage": "123", "memory_mb": "64"}
+	if len(snap.Values) != len(want) {
+		t.Errorf("expected all four metrics, got %v", snap.Values)
+	}
+	for name, value := range want {
+		if got := snap.Values[name]; got != value {
+			t.Errorf("%s: got %q, want %q", name, got, value)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for query := range queries {
+		if seen[query] != 1 {
+			t.Errorf("query %q received %d times, want once", query, seen[query])
+		}
 	}
 }
 

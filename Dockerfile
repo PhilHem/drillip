@@ -1,4 +1,5 @@
 FROM golang:1.26-alpine AS build
+RUN apk add --no-cache ca-certificates
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -7,6 +8,7 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /drillip .
 
 FROM scratch
 COPY --from=build /drillip /drillip
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 VOLUME /data
 ENV DRILLIP_DB=/data/errors.db
 ENV DRILLIP_ADDR=0.0.0.0:8300
