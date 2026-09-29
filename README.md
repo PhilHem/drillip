@@ -22,8 +22,8 @@ For an existing application, [run Drillip](docs/how-to/run-drillip.md) and
 
 | Need | Documentation |
 |---|---|
-| Learn with a tutorial | [Capture and resolve your first error](docs/tutorials/first-error.md) |
-| Complete a task | [Run Drillip](docs/how-to/run-drillip.md), [send errors](docs/how-to/send-errors.md), [set up email](docs/how-to/email-notifications.md) |
+| Learn with a tutorial | [Capture and resolve your first error](docs/tutorials/first-error.md), [run Python and Drillip in one container](docs/tutorials/python-container.md) |
+| Complete a task | [Run Drillip](docs/how-to/run-drillip.md), [embed in an application container](docs/how-to/embed-drillip.md), [send errors](docs/how-to/send-errors.md), [set up email](docs/how-to/email-notifications.md) |
 | Look up a setting or interface | [Configuration](docs/reference/configuration.md), [HTTP API](docs/reference/http-api.md), [CLI](docs/reference/cli.md) |
 | Understand the concepts | [How Drillip works](docs/explanation/overview.md), [error grouping and lifecycle](docs/explanation/error-lifecycle.md) |
 

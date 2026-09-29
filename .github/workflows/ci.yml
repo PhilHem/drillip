@@ -6,6 +6,16 @@ on:
   pull_request:
 
 jobs:
+  embedded-python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build embedded Python example
+        run: docker build --platform linux/amd64 -t drillip-python-example examples/python-container
+      - name: Exercise capture and process lifecycle
+        run: python3 examples/python-container/smoke_test.py
+
   test:
     runs-on: ubuntu-latest
     steps:
