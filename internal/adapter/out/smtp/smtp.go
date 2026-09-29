@@ -1,6 +1,7 @@
 package smtp
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -40,6 +41,9 @@ func (c SMTPConfig) Addr() string {
 	return net.JoinHostPort(c.Host, port)
 }
 
+const smtpAttemptTimeout = 5 * time.Second
+const notificationDrainTimeout = 8 * time.Second
+
 // Notifier holds cooldown state and sends email notifications.
 // It is safe for concurrent use from multiple goroutines.
 type Notifier struct {
@@ -49,15 +53,20 @@ type Notifier struct {
 	Digest     time.Duration // batch window; 0 means send immediately
 	onNotified func(string)  // called after send with fingerprint; nil = no-op
 
-	mu       sync.Mutex
-	lastSent time.Time
-	recent   map[string]time.Time // fingerprint -> last notified
-	pending  []pendingNotification
-	timer    *time.Timer
+	ctx       context.Context
+	cancel    context.CancelFunc
+	workers   sync.WaitGroup
+	closeOnce sync.Once
+	closed    bool
+	mu        sync.Mutex
+	lastSent  time.Time
+	recent    map[string]time.Time // fingerprint -> last notified
+	pending   []pendingNotification
+	timer     *time.Timer
 
 	// now and sendMail are injectable for testing.
 	now      func() time.Time
-	sendMail func(addr string, a smtp.Auth, from string, to []string, msg []byte) error
+	sendMail func(ctx context.Context, addr string, a smtp.Auth, from string, to []string, msg []byte) error
 }
 
 // pendingNotification holds a buffered notification awaiting digest flush.
@@ -74,7 +83,10 @@ type pendingNotification struct {
 // The onNotified callback is called with the fingerprint after each successful send;
 // pass nil to disable.
 func NewNotifier(smtpCfg SMTPConfig, project string, cooldown, digest time.Duration, onNotified func(string)) *Notifier {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Notifier{
+		ctx:        ctx,
+		cancel:     cancel,
 		SMTP:       smtpCfg,
 		Project:    project,
 		Cooldown:   cooldown,
@@ -84,8 +96,9 @@ func NewNotifier(smtpCfg SMTPConfig, project string, cooldown, digest time.Durat
 	}
 }
 
-// SetSendMail overrides the function used to send emails. Intended for testing.
-func (n *Notifier) SetSendMail(fn func(addr string, a smtp.Auth, from string, to []string, msg []byte) error) {
+// SetSendMail overrides delivery for tests; configure it before using the notifier.
+// The function must honor context cancellation.
+func (n *Notifier) SetSendMail(fn func(ctx context.Context, addr string, a smtp.Auth, from string, to []string, msg []byte) error) {
 	n.sendMail = fn
 }
 
@@ -128,13 +141,17 @@ func (n *Notifier) shouldNotify(fp string) bool {
 // NotifyNewError sends an email for a newly seen or regressed error, subject to cooldown.
 // When regression is true, the email uses amber styling and includes resolvedFor duration.
 // If digest batching is enabled, the notification is buffered and sent when the digest
-// window expires. Safe to call from a goroutine.
+// window expires. Accepted work is registered before returning and owned by the notifier.
 func (n *Notifier) NotifyNewError(ev *domain.Event, fp string, regression bool, resolvedFor time.Duration) {
 	if !n.SMTP.Enabled() {
 		return
 	}
 
 	n.mu.Lock()
+	if n.closed {
+		n.mu.Unlock()
+		return
+	}
 	ok := n.shouldNotify(fp)
 	if !ok {
 		n.mu.Unlock()
@@ -143,8 +160,8 @@ func (n *Notifier) NotifyNewError(ev *domain.Event, fp string, regression bool, 
 	}
 
 	if n.Digest <= 0 {
+		n.startLocked(func() { n.sendIndividual(ev, fp, regression, resolvedFor) })
 		n.mu.Unlock()
-		n.sendIndividual(ev, fp, regression, resolvedFor)
 		return
 	}
 
@@ -191,21 +208,18 @@ func (n *Notifier) send(subject, textBody, htmlBody string) error {
 		auth = smtp.PlainAuth("", n.SMTP.User, n.SMTP.Pass, n.SMTP.Host)
 	}
 
-	sendFn := n.sendMail
-	if sendFn == nil {
-		if n.SMTP.SkipVerify {
-			sendFn = n.sendMailSkipVerify
-		} else {
-			sendFn = smtp.SendMail
-		}
-	}
-
 	var err error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
-			time.Sleep(time.Duration(attempt) * 2 * time.Second) // 2s, 4s backoff
+			timer := time.NewTimer(time.Duration(attempt) * 2 * time.Second)
+			select {
+			case <-timer.C:
+			case <-n.ctx.Done():
+				timer.Stop()
+				return n.ctx.Err()
+			}
 		}
-		err = sendFn(n.SMTP.Addr(), auth, n.SMTP.From, []string{n.SMTP.To}, msg)
+		err = n.deliver(auth, msg)
 		if err == nil {
 			slog.Info("notify: email sent", "to", n.SMTP.To, "subject", subject)
 			return nil
@@ -216,23 +230,40 @@ func (n *Notifier) send(subject, textBody, htmlBody string) error {
 	return err
 }
 
-// sendMailSkipVerify is like smtp.SendMail but skips TLS certificate verification.
-// Used when the SMTP server uses a CA not in the container's trust store.
-func (n *Notifier) sendMailSkipVerify(addr string, auth smtp.Auth, from string, to []string, msg []byte) error {
-	host, _, _ := net.SplitHostPort(addr)
-
-	c, err := smtp.Dial(addr)
+// deliver bounds dialing, the server greeting, TLS, and all protocol exchanges.
+func (n *Notifier) deliver(auth smtp.Auth, msg []byte) error {
+	ctx, cancel := context.WithTimeout(n.ctx, smtpAttemptTimeout)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if n.sendMail != nil {
+		return n.sendMail(ctx, n.SMTP.Addr(), auth, n.SMTP.From, []string{n.SMTP.To}, msg)
+	}
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", n.SMTP.Addr())
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	deadline, _ := ctx.Deadline()
+	if err := conn.SetDeadline(deadline); err != nil {
+		return err
+	}
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
+	c, err := smtp.NewClient(conn, n.SMTP.Host)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
 
-	// STARTTLS with InsecureSkipVerify
-	if err := c.StartTLS(&tls.Config{
-		ServerName:         host,
-		InsecureSkipVerify: true, //nolint:gosec // intentional, configured via DRILLIP_SMTP_SKIP_VERIFY
-	}); err != nil {
-		return err
+	if ok, _ := c.Extension("STARTTLS"); ok || n.SMTP.SkipVerify {
+		if err := c.StartTLS(&tls.Config{
+			ServerName:         n.SMTP.Host,
+			InsecureSkipVerify: n.SMTP.SkipVerify, //nolint:gosec // explicit operator setting
+		}); err != nil {
+			return err
+		}
 	}
 
 	if auth != nil {
@@ -241,13 +272,11 @@ func (n *Notifier) sendMailSkipVerify(addr string, auth smtp.Auth, from string, 
 		}
 	}
 
-	if err := c.Mail(from); err != nil {
+	if err := c.Mail(n.SMTP.From); err != nil {
 		return err
 	}
-	for _, rcpt := range to {
-		if err := c.Rcpt(rcpt); err != nil {
-			return err
-		}
+	if err := c.Rcpt(n.SMTP.To); err != nil {
+		return err
 	}
 
 	w, err := c.Data()
@@ -269,6 +298,15 @@ func (n *Notifier) SendTestEmail() error {
 	if !n.SMTP.Enabled() {
 		return fmt.Errorf("SMTP not configured")
 	}
+
+	n.mu.Lock()
+	if n.closed {
+		n.mu.Unlock()
+		return fmt.Errorf("notifier closed")
+	}
+	n.workers.Add(1)
+	n.mu.Unlock()
+	defer n.workers.Done()
 
 	subject := sanitizeHeader(fmt.Sprintf("[drillip] test email from %s", n.Project))
 	textBody := fmt.Sprintf("This is a test email from drillip.\n\nProject: %s\nSMTP: %s\nTime: %s\n",
@@ -305,36 +343,41 @@ func (n *Notifier) SendTestEmail() error {
 		smtpAuth = smtp.PlainAuth("", n.SMTP.User, n.SMTP.Pass, n.SMTP.Host)
 	}
 
-	sendFn := n.sendMail
-	if sendFn == nil {
-		if n.SMTP.SkipVerify {
-			sendFn = n.sendMailSkipVerify
-		} else {
-			sendFn = smtp.SendMail
-		}
-	}
-	if err := sendFn(n.SMTP.Addr(), smtpAuth, n.SMTP.From, []string{n.SMTP.To}, msg); err != nil {
+	if err := n.deliver(smtpAuth, msg); err != nil {
 		return err
 	}
 	slog.Info("notify: test email sent", "to", n.SMTP.To)
 	return nil
 }
 
-// flush sends all pending notifications as a digest (or individual if only one).
+// startLocked registers accepted work before launching it. n.mu must be held.
+func (n *Notifier) startLocked(work func()) {
+	n.workers.Add(1)
+	go func() { defer n.workers.Done(); work() }()
+}
+
+// flush registers a digest for delivery. Close owns the final flush.
 func (n *Notifier) flush() {
 	n.mu.Lock()
+	defer n.mu.Unlock()
+	if !n.closed {
+		n.flushLocked()
+	}
+}
+
+func (n *Notifier) flushLocked() {
 	items := n.pending
 	n.pending = nil
 	if n.timer != nil {
 		n.timer.Stop()
 		n.timer = nil
 	}
-	n.mu.Unlock()
-
-	if len(items) == 0 {
-		return
+	if len(items) > 0 {
+		n.startLocked(func() { n.sendDigest(items) })
 	}
+}
 
+func (n *Notifier) sendDigest(items []pendingNotification) {
 	if len(items) == 1 {
 		p := items[0]
 		n.sendIndividual(p.Event, p.Fingerprint, p.IsRegression, p.ResolvedFor)
@@ -353,16 +396,27 @@ func (n *Notifier) flush() {
 	}
 }
 
-// Close stops any pending digest timer and flushes buffered notifications.
-// Call this during graceful shutdown.
+// Close stops accepting work, flushes buffered notifications, and joins all
+// accepted deliveries and callbacks. After eight seconds it cancels SMTP and
+// retries, then waits for those workers to exit before returning. It is idempotent.
 func (n *Notifier) Close() {
-	n.mu.Lock()
-	if n.timer != nil {
-		n.timer.Stop()
-		n.timer = nil
-	}
-	n.mu.Unlock()
-	n.flush()
+	n.closeOnce.Do(func() {
+		n.mu.Lock()
+		n.closed = true
+		n.flushLocked()
+		n.mu.Unlock()
+		done := make(chan struct{})
+		go func() { n.workers.Wait(); close(done) }()
+		timer := time.NewTimer(notificationDrainTimeout)
+		defer timer.Stop()
+		select {
+		case <-done:
+		case <-timer.C:
+			n.cancel()
+			<-done
+		}
+		n.cancel()
+	})
 }
 
 // markNotified records that a notification was sent for the given fingerprint,
@@ -374,12 +428,22 @@ func (n *Notifier) markNotified(fp string) {
 }
 
 // NotifyResolved sends an email summarizing errors that were resolved.
-// Safe to call from a goroutine.
+// It registers accepted work before returning.
 func (n *Notifier) NotifyResolved(resolved []domain.ResolvedError) {
 	if !n.SMTP.Enabled() || len(resolved) == 0 {
 		return
 	}
 
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.closed {
+		return
+	}
+	items := append([]domain.ResolvedError(nil), resolved...)
+	n.startLocked(func() { n.sendResolved(items) })
+}
+
+func (n *Notifier) sendResolved(resolved []domain.ResolvedError) {
 	subject := sanitizeHeader(fmt.Sprintf("[drillip] resolved: %d errors in %s", len(resolved), n.Project))
 	htmlBody := formatResolvedHTMLEmail(resolved, n.Project)
 	textBody := formatResolvedPlainEmail(resolved, n.Project)

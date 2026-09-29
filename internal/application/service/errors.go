@@ -51,7 +51,7 @@ func (s *Errors) Ingest(event *domain.Event) (string, error) {
 		if s.store.IsSilenced(result.Fingerprint) {
 			slog.Info("notify: silenced fingerprint, skipping", "fingerprint", result.Fingerprint[:8])
 		} else {
-			go s.notifier.NotifyNewError(event, result.Fingerprint, result.IsRegression, result.ResolvedDuration)
+			s.notifier.NotifyNewError(event, result.Fingerprint, result.IsRegression, result.ResolvedDuration)
 		}
 	}
 	return result.Fingerprint, nil
@@ -68,7 +68,7 @@ func (s *Errors) Resolve(ctx context.Context, prefix string) (domain.ResolveResu
 	}
 	result, err := s.store.Resolve(fp)
 	if err == nil && s.notifier != nil && len(result.Resolved) > 0 {
-		go s.notifier.NotifyResolved(result.Resolved)
+		s.notifier.NotifyResolved(result.Resolved)
 	}
 	return result, err
 }

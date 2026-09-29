@@ -51,7 +51,7 @@ func (m *Maintenance) autoResolve() {
 	if len(resolved) > 0 {
 		slog.Info("auto-resolved errors", "count", len(resolved), "older_than", m.ResolveAfter)
 		if m.Notifier != nil {
-			go m.Notifier.NotifyResolved(resolved)
+			m.Notifier.NotifyResolved(resolved)
 		}
 	}
 }
