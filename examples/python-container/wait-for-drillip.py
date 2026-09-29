@@ -2,17 +2,16 @@
 import os
 import sys
 import time
-import urllib.error
-import urllib.request
+import subprocess
 
 deadline = time.monotonic() + 10
-url = "http://" + os.environ["DRILLIP_ADDR"] + "/-/healthy"
 while time.monotonic() < deadline:
     try:
-        with urllib.request.urlopen(url, timeout=1) as response:
-            if response.read() == b"ok":
-                break
-    except (OSError, urllib.error.URLError):
+        result = subprocess.run(["drillip", "health"], timeout=1,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if result.returncode == 0:
+            break
+    except subprocess.TimeoutExpired:
         pass
     time.sleep(0.1)
 else:

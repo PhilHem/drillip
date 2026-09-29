@@ -57,7 +57,13 @@ arguments. Do not type the brackets.
 | `drillip silence [--reason <text>] <fingerprint> [duration]` | Silence notifications for the exact fingerprint, indefinitely if duration is omitted. |
 | `drillip silences` | List active silences. |
 | `drillip unsilence <fingerprint>` | Remove silences for the exact fingerprint. |
-| `drillip health` | Call `/-/healthy` at the configured address; print `ok` on HTTP `200`. |
+| `drillip health` | Call `/-/healthy` at the configured address; print `ok` on HTTP `200`, with a two-second request deadline. |
+
+The health target uses loopback when the configured listen address is a wildcard
+(`0.0.0.0`, `::`, or an empty host). The health command does not open SQLite.
+The two-second deadline applies to builds containing this change; the example
+image pinned to v0.3.14 has the command but no built-in deadline. Its startup
+wrapper bounds each invocation separately.
 
 `--level` filters by severity, for example `error` or `warning`. `--tag`
 filters by one `key=value` pair. Durations for `gc` and `silence` are whole
