@@ -6,6 +6,7 @@ import (
 )
 
 var (
+	ErrOccurrenceNotFound   = errors.New("occurrence not found")
 	ErrErrorNotFound        = errors.New("error not found")
 	ErrAmbiguousFingerprint = errors.New("ambiguous fingerprint")
 	ErrInvalidFingerprint   = errors.New("invalid fingerprint")

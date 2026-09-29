@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -17,7 +18,7 @@ func TestQueryJournalctlSkipNonLinux(t *testing.T) {
 }
 
 func TestQueryJournalctlEmptyUnit(t *testing.T) {
-	entries, err := QueryJournalctl("", time.Now())
+	entries, err := QueryJournalctl(context.Background(), "", time.Now())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -27,7 +28,7 @@ func TestQueryJournalctlEmptyUnit(t *testing.T) {
 }
 
 func TestQueryVictoriaTracesEmptyURL(t *testing.T) {
-	td, err := QueryVictoriaTraces("", "abc")
+	td, err := QueryVictoriaTraces(context.Background(), "", "abc")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -37,7 +38,7 @@ func TestQueryVictoriaTracesEmptyURL(t *testing.T) {
 }
 
 func TestQueryVictoriaTracesEmptyTraceID(t *testing.T) {
-	td, err := QueryVictoriaTraces("http://example.com", "")
+	td, err := QueryVictoriaTraces(context.Background(), "http://example.com", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -60,7 +61,7 @@ func TestQueryVictoriaTracesMock(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	td, err := QueryVictoriaTraces(srv.URL, "abc123")
+	td, err := QueryVictoriaTraces(context.Background(), srv.URL, "abc123")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -84,14 +85,14 @@ func TestQueryVictoriaTraces500(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := QueryVictoriaTraces(srv.URL, "abc")
+	_, err := QueryVictoriaTraces(context.Background(), srv.URL, "abc")
 	if err == nil {
 		t.Fatal("expected error on 500")
 	}
 }
 
 func TestQueryVictoriaMetricsEmptyURL(t *testing.T) {
-	snap, err := QueryVictoriaMetrics("", time.Now())
+	snap, err := QueryVictoriaMetrics(context.Background(), "", time.Now())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -132,14 +133,14 @@ func TestQueryVictoriaMetricsMock(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	snap, err := QueryVictoriaMetrics(srv.URL+"/", ts)
+	snap, err := QueryVictoriaMetrics(context.Background(), srv.URL+"/", ts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if snap == nil {
 		t.Fatal("expected snapshot")
 	}
-	want := map[string]string{"error_rate": "0.42", "p99_latency": "0.9", "cpu_usage": "123", "memory_mb": "64"}
+	want := map[string]string{"error_rate": "0.42", "p99_latency": "0.9", "cpu_seconds": "123", "memory_mb": "64"}
 	if len(snap.Values) != len(want) {
 		t.Errorf("expected all four metrics, got %v", snap.Values)
 	}
@@ -158,7 +159,7 @@ func TestQueryVictoriaMetricsMock(t *testing.T) {
 }
 
 func TestQueryPyroscopeEmptyURL(t *testing.T) {
-	entries, err := QueryPyroscope("", "svc", time.Now())
+	entries, err := QueryPyroscope(context.Background(), "", "svc", time.Now())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -168,7 +169,7 @@ func TestQueryPyroscopeEmptyURL(t *testing.T) {
 }
 
 func TestQueryPyroscopeEmptyService(t *testing.T) {
-	entries, err := QueryPyroscope("http://example.com", "", time.Now())
+	entries, err := QueryPyroscope(context.Background(), "http://example.com", "", time.Now())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -184,7 +185,7 @@ func TestQueryPyroscopeMock(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	entries, err := QueryPyroscope(srv.URL, "myapp", time.Now())
+	entries, err := QueryPyroscope(context.Background(), srv.URL, "myapp", time.Now())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -202,8 +203,41 @@ func TestQueryPyroscope500(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := QueryPyroscope(srv.URL, "myapp", time.Now())
+	_, err := QueryPyroscope(context.Background(), srv.URL, "myapp", time.Now())
 	if err == nil {
 		t.Fatal("expected error on 500")
+	}
+}
+
+func TestMetricsNeverChoosesAnArbitrarySeries(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"data":{"result":[{"metric":{"instance":"a"},"value":[1,"2"]},{"metric":{"instance":"b"},"value":[1,"99"]}]}}`)
+	}))
+	defer srv.Close()
+	snap, err := QueryVictoriaMetrics(context.Background(), srv.URL, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range snap.Values {
+		if value != "(ambiguous: multiple series)" {
+			t.Fatalf("%s=%s", key, value)
+		}
+	}
+}
+func TestTelemetryRequestsHonorCancellation(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	defer srv.Close()
+	for _, query := range []func(context.Context){
+		func(ctx context.Context) { _, _ = QueryVictoriaTraces(ctx, srv.URL, "trace") },
+		func(ctx context.Context) { _, _ = QueryVictoriaMetrics(ctx, srv.URL, time.Now()) },
+		func(ctx context.Context) { _, _ = QueryPyroscope(ctx, srv.URL, "service", time.Now()) },
+	} {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+		start := time.Now()
+		query(ctx)
+		cancel()
+		if time.Since(start) > time.Second {
+			t.Fatal("request ignored context")
+		}
 	}
 }

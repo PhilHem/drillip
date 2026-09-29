@@ -47,7 +47,9 @@ use that default.
 `top`, `recent`, and `show` include a `state` field: `new`, `ongoing`, or
 `resolved`. See the [lifecycle explanation](../explanation/error-lifecycle.md).
 Correlation returns the available context; unconfigured or unavailable
-integrations can leave sections absent.
+integrations can leave sections absent. Optional enrichment has a shared five-second
+budget so stored context remains available when a source stalls. A missing retained
+occurrence leaves optional context absent; an actual storage failure returns 500.
 
 ## Actions
 
@@ -188,7 +190,7 @@ integrations:
 | `stacktrace`, `breadcrumbs`, `user` | Stored JSON values, as in error detail. |
 | `logs` | Array of objects with `timestamp`, `message`, and optional `priority` (strings). The timestamp is journalctl's raw microseconds-since-epoch value. |
 | `trace` | Object with `service_name` (string) and `spans` (array, or `null` when empty). Each span has `operation_name` and `duration` (strings, for example `"1.5ms"`). |
-| `metrics` | Object mapping metric names to string values. An individual failed query can have the value `"(error)"`. |
+| `metrics` | Object mapping metric names to string values. An individual query can report `"(error)"`, `"(timeout)"`, or `"(ambiguous: multiple series)"`. |
 | `profile` | Array of objects with `function` (string). |
 
 A missing occurrence or unavailable integration can still produce HTTP `200`

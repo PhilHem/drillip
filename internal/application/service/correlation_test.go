@@ -58,19 +58,19 @@ func (r *telemetryRecorder) record(source string) error {
 	}
 	return nil
 }
-func (r *telemetryRecorder) Logs(at time.Time) ([]domain.JournalEntry, error) {
+func (r *telemetryRecorder) Logs(_ context.Context, at time.Time) ([]domain.JournalEntry, error) {
 	r.times = append(r.times, at)
 	return []domain.JournalEntry{{Message: "log"}}, r.record("logs")
 }
-func (r *telemetryRecorder) Trace(id string) (*domain.TraceData, error) {
+func (r *telemetryRecorder) Trace(_ context.Context, id string) (*domain.TraceData, error) {
 	r.traceID = id
 	return &domain.TraceData{ServiceName: "api"}, r.record("trace")
 }
-func (r *telemetryRecorder) Metrics(at time.Time) (*domain.MetricsSnapshot, error) {
+func (r *telemetryRecorder) Metrics(_ context.Context, at time.Time) (*domain.MetricsSnapshot, error) {
 	r.times = append(r.times, at)
 	return &domain.MetricsSnapshot{Values: map[string]string{"cpu": "0.5"}}, r.record("metrics")
 }
-func (r *telemetryRecorder) Profile(at time.Time) ([]domain.ProfileEntry, error) {
+func (r *telemetryRecorder) Profile(_ context.Context, at time.Time) ([]domain.ProfileEntry, error) {
 	r.times = append(r.times, at)
 	return []domain.ProfileEntry{{Function: "main"}}, r.record("profile")
 }
@@ -130,7 +130,7 @@ func TestCorrelateReturnsErrorLookupFailures(t *testing.T) {
 
 func TestCorrelateKeepsErrorWhenOccurrenceUnavailable(t *testing.T) {
 	repo := correlationRepo()
-	repo.occurrenceErr = errors.New("occurrence unavailable")
+	repo.occurrenceErr = domain.ErrOccurrenceNotFound
 	telemetry := &telemetryRecorder{}
 	result, err := New(repo, nil, telemetry).Correlate(context.Background(), inport.CorrelateQuery{Fingerprint: "abcd", Nth: 99})
 	if err != nil {
@@ -206,5 +206,14 @@ func TestCorrelateWithoutTelemetryKeepsLocalContext(t *testing.T) {
 	}
 	if result.Logs != nil || result.Trace != nil || result.Metrics != nil || result.Profile != nil {
 		t.Fatal("unexpected telemetry")
+	}
+}
+
+func TestCorrelateReportsOccurrenceStorageFailure(t *testing.T) {
+	repo := correlationRepo()
+	repo.occurrenceErr = errors.New("database read failed")
+	result, err := New(repo, nil, nil).Correlate(context.Background(), inport.CorrelateQuery{Fingerprint: "abcd", Nth: 1})
+	if result != nil || !errors.Is(err, repo.occurrenceErr) {
+		t.Fatalf("result=%+v err=%v", result, err)
 	}
 }

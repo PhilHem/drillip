@@ -22,16 +22,16 @@ import (
 
 type serverTelemetry struct{}
 
-func (serverTelemetry) Logs(time.Time) ([]domain.JournalEntry, error) {
+func (serverTelemetry) Logs(_ context.Context, _ time.Time) ([]domain.JournalEntry, error) {
 	return []domain.JournalEntry{{Message: "server-owned diagnostic"}}, nil
 }
-func (serverTelemetry) Trace(string) (*domain.TraceData, error) {
+func (serverTelemetry) Trace(_ context.Context, _ string) (*domain.TraceData, error) {
 	return &domain.TraceData{ServiceName: "checkout", Spans: []domain.TraceSpan{{OperationName: "charge", Duration: time.Millisecond}}}, nil
 }
-func (serverTelemetry) Metrics(time.Time) (*domain.MetricsSnapshot, error) {
+func (serverTelemetry) Metrics(_ context.Context, _ time.Time) (*domain.MetricsSnapshot, error) {
 	return &domain.MetricsSnapshot{Values: map[string]string{"requests": "42"}}, nil
 }
-func (serverTelemetry) Profile(time.Time) ([]domain.ProfileEntry, error) {
+func (serverTelemetry) Profile(_ context.Context, _ time.Time) ([]domain.ProfileEntry, error) {
 	return []domain.ProfileEntry{{Function: "checkout"}}, nil
 }
 

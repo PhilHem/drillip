@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	inport "github.com/PhilHem/drillip/internal/application/port/in"
@@ -26,8 +27,11 @@ func (s *Errors) Correlate(ctx context.Context, query inport.CorrelateQuery) (*d
 	result := &domain.Correlation{Error: *detail}
 	result.Error.Fingerprint = fp
 	occurrence, err := s.store.GetNthOccurrence(fp, query.Nth)
-	if err != nil {
+	if errors.Is(err, domain.ErrOccurrenceNotFound) {
 		return result, nil
+	}
+	if err != nil {
+		return nil, err
 	}
 	occTime, _ := time.Parse(time.RFC3339, occurrence.Timestamp)
 	traceID := occurrence.TraceID
@@ -41,29 +45,35 @@ func (s *Errors) Correlate(ctx context.Context, query inport.CorrelateQuery) (*d
 		return result, nil
 	}
 
-	if !occTime.IsZero() {
-		if logs, err := s.telemetry.Logs(occTime); err == nil {
+	// A slow optional source must not consume the CLI's entire request deadline.
+	enrichment, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if !occTime.IsZero() && enrichment.Err() == nil {
+		if logs, err := s.telemetry.Logs(enrichment, occTime); err == nil {
 			result.Logs = logs
 		}
 	}
 
-	if traceID != "" {
-		if trace, err := s.telemetry.Trace(traceID); err == nil {
+	if traceID != "" && enrichment.Err() == nil {
+		if trace, err := s.telemetry.Trace(enrichment, traceID); err == nil {
 			result.Trace = trace
 		}
 	}
 
-	if !occTime.IsZero() {
-		if metrics, err := s.telemetry.Metrics(occTime); err == nil {
+	if !occTime.IsZero() && enrichment.Err() == nil {
+		if metrics, err := s.telemetry.Metrics(enrichment, occTime); err == nil {
 			result.Metrics = metrics
 		}
 	}
 
-	if !occTime.IsZero() {
-		if profile, err := s.telemetry.Profile(occTime); err == nil {
+	if !occTime.IsZero() && enrichment.Err() == nil {
+		if profile, err := s.telemetry.Profile(enrichment, occTime); err == nil {
 			result.Profile = profile
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return result, nil
 }
