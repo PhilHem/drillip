@@ -20,6 +20,10 @@ docker run -d \
 The database persists in the `drillip-data` volume. The published port is
 reachable on the host's loopback address.
 
+To package Drillip inside an existing application's container, use
+[Embed Drillip in an application container](embed-drillip.md). For a guided
+example, follow [Run a Python service and Drillip in one container](../tutorials/python-container.md).
+
 ## Binary
 
 With Go installed, run:
