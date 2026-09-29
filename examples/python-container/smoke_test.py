@@ -69,6 +69,15 @@ def pid(program):
     return int(control("pid", program))
 
 
+def probe(target):
+    return docker("exec", NAME, "python", "/app/healthcheck.py", target, check=False)
+
+
+def last_healthcheck():
+    logs = docker("inspect", "--format", "{{json .State.Health.Log}}", NAME).stdout
+    return json.loads(logs)[-1]["Start"]
+
+
 def crash_and_recover(program):
     previous = pid(program)
     assert previous > 0
@@ -94,12 +103,22 @@ try:
 
     application_pid = pid("app")
     control("stop", "drillip")
-    wait_for("tracker outage marks container unhealthy", lambda: health() == "unhealthy")
+    previous_check = last_healthcheck()
+    assert probe("drillip").returncode != 0
+    assert probe("app").returncode == 0
+    wait_for("application stays healthy without tracker", lambda:
+             last_healthcheck() != previous_check and health() == "healthy")
     assert request(base, "/health") == (200, b"ok")
     assert pid("app") == application_pid
     control("start", "drillip")
-    wait_for("tracker recovery", lambda: health() == "healthy")
+    wait_for("tracker recovery", lambda: probe("drillip").returncode == 0)
     assert pid("app") == application_pid
+
+    control("stop", "app")
+    wait_for("application outage marks container unhealthy", lambda: health() == "unhealthy")
+    assert probe("drillip").returncode == 0
+    control("start", "app")
+    wait_for("application recovery", lambda: health() == "healthy")
 
     # Stop immediately after capture; the application must drain before Drillip exits.
     assert request(base, "/fail")[0] == 500
@@ -124,7 +143,9 @@ try:
         except (OSError, urllib.error.URLError):
             return False
     wait_for("application starts despite tracker startup failure", app_available)
-    wait_for("failed tracker is visible in health", lambda: health() == "unhealthy")
+    wait_for("application healthy despite tracker startup failure", lambda: health() == "healthy")
+    diagnosis = probe("drillip")
+    assert diagnosis.returncode != 0 and "drillip: unavailable" in diagnosis.stderr
     wait_for("failed tracker reaches FATAL", lambda: "FATAL" in docker(
         "exec", NAME, "supervisorctl", "-c", "/app/supervisord.conf", "status", "drillip", check=False).stdout)
     logs = docker("logs", NAME)

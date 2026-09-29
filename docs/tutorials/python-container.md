@@ -31,6 +31,17 @@ docker inspect --format '{{.State.Health.Status}}' drillip-python
 Repeat until the output is `healthy`, normally within 15 seconds. If it becomes
 `unhealthy`, inspect `docker logs drillip-python` before continuing.
 
+Container health describes the Python service. Confirm that the embedded tracker
+is ready too:
+
+```bash
+docker exec drillip-python python /app/healthcheck.py drillip
+```
+
+Expect `drillip: ok`. If the probe reports `drillip: unavailable`, inspect the
+container logs and repeat the probe before sending an event. Python remains
+available during a tracker outage; error reporting is checked separately.
+
 Check the Python service:
 
 ```bash
