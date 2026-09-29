@@ -1,5 +1,9 @@
 # CLI reference
 
+This describes the current checkout, including command API version 1. The pinned
+v0.3.14 image has older CLI behavior. See [the migration procedure](../how-to/upgrade-cli.md)
+to build a matching client/server pair and verify the switch.
+
 The same binary runs the server and provides investigation and management
 commands. Normal commands use one HTTP or HTTPS server; they do not open a local
 database or read local SMTP/observability settings. The server owns those policies.

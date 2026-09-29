@@ -6,7 +6,10 @@ example for your language below.
 
 Replace `127.0.0.1:8300` with the address reachable from your application.
 Inside a separate container, `127.0.0.1` refers to that container. The DSN key
-is ignored; the examples use `anykey`.
+is ignored; the examples use `anykey`. The project number also does not isolate
+data. Every sender shares the instance's database and grouping rules. Use separate
+instances for independent histories or access boundaries; see
+[the operating model](../explanation/operating-model.md).
 
 ```python
 # Python
