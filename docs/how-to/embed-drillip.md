@@ -2,8 +2,9 @@
 
 Use this pattern when you want to deploy your service and its error tracker as
 one container. Each container has its own Drillip database. For independent
-upgrades or a shared tracker across replicas, use the
-[separate-container setup](run-drillip.md#docker).
+upgrades or a shared tracker across trusted replicas of the same service, use the
+[separate-container setup](run-drillip.md#docker). Shared trackers combine history
+and configuration; see [the operating model](../explanation/operating-model.md).
 
 The [Python example](../../examples/python-container/Dockerfile) is a tested
 template. To learn the pattern first, follow the
