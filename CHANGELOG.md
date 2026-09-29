@@ -1,5 +1,45 @@
 # Changelog
 
+## v0.3.15 - 2026-09-29
+
+### Upgrade
+
+- Upgrade the server and CLI together: normal commands now use HTTP and require
+  command API version 1. Select the server with `--server` or `DRILLIP_SERVER`;
+  use `maintenance --db PATH` for intentional access to an existing local database.
+  Existing database files remain usable. See the [CLI upgrade guide](docs/how-to/upgrade-cli.md).
+  (#67, #69)
+
+### Added
+
+- A Python service example runs Drillip in the same container, with Docker Compose,
+  persistent storage, process recovery, and separate application and tracker health
+  checks. (#60, #61, #62, #63)
+- Tutorials, task guides, CLI and HTTP references, lifecycle and operating-model
+  explanations, and a linked glossary make deployment and error investigation
+  easier to follow. (#50, #52, #53, #54, #55, #56, #58, #70, #74)
+
+### Changed
+
+- CLI and HTTP operations share application services for queries, state changes,
+  and correlation, with canonical fingerprints returned in query results.
+  Implementation packages are now internal. (#48, #49, #51, #68, #69)
+
+### Fixed
+
+- CLI failures return a nonzero status; HTTP health checks and command requests
+  have bounded timeouts. (#64, #65, #69)
+- Fingerprint prefixes must select exactly one error for reads and state changes;
+  ambiguous prefixes fail without modifying any group. (#66)
+- Container images include trusted public CA certificates, and metric queries are
+  URL-encoded correctly. (#59)
+- CLI truncation preserves valid UTF-8. (#71)
+- Optional telemetry shares a five-second budget while stored error context remains
+  available; journal queries use timezone-independent timestamps, and ambiguous
+  metric results are reported explicitly. (#72)
+- Notification shutdown drains accepted work before cancelling and joining pending
+  delivery; each SMTP attempt has a five-second deadline. (#73)
+
 ## v0.3.14 - 2026-09-28
 
 ### Fixed

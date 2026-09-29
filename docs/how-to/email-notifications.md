@@ -8,7 +8,7 @@ Have the SMTP host, port, and any required login credentials ready. Drillip
 uses SMTP with STARTTLS when the server offers it. Use your provider's
 STARTTLS endpoint, not an implicit-TLS endpoint such as port 465.
 
-Docker images built from this checkout include a public CA bundle for TLS
+Docker images from v0.3.15 include a public CA bundle for TLS
 certificate verification. The `v0.3.14` image used in the run guide does not
 include it. For that image, mount a trusted PEM CA bundle read-only and set
 `SSL_CERT_FILE` to its path inside the container. This also supports an SMTP
