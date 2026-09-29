@@ -149,3 +149,4 @@ func TestPrintHint(t *testing.T) {
 		t.Fatalf("missing second hint: %s", out)
 	}
 }
+
