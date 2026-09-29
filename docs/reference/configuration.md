@@ -1,5 +1,8 @@
 # Configuration reference
 
+This describes the current checkout. `DRILLIP_SERVER` and the new CLI modes
+require a matching client/server build; see [the migration guide](../how-to/upgrade-cli.md).
+
 Drillip reads configuration from environment variables when it starts. All
 variables are optional. Unset or empty variables use the defaults below;
 `—` means no value is set.

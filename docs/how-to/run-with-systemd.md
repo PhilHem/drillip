@@ -46,6 +46,21 @@ example's host port `8300`.
 Use `http://anykey@127.0.0.1:8301/1` as the DSN for an application running on
 the same host. See [Send errors](send-errors.md) for SDK configuration.
 
+## Run operator commands
+
+With the current checkout installed, select the unit's actual port in your shell:
+
+```sh
+export DRILLIP_SERVER=http://127.0.0.1:8301
+drillip health
+drillip top
+```
+
+Expect `ok` and either an error list or `no errors recorded`. Your interactive
+shell does not inherit the unit's environment. Normal commands use the server
+and do not need permission to open its systemd-managed database. For an existing
+older installation, use [the upgrade procedure](upgrade-cli.md).
+
 ## Change configuration
 
 Use an override to set environment variables without editing the supplied
