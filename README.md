@@ -10,6 +10,12 @@ events, groups them in SQLite, and sends email notifications for new errors
 and regressions. Investigate errors through its CLI and HTTP API, with
 optional log, metric, trace, and profile correlation.
 
+One reason Drillip exists is to make Sentry SDK error reporting useful without
+another user-management system to operate. For services already managed through
+trusted host/container access or SSH, Drillip reuses that access boundary, with
+no separate accounts, teams, or roles to maintain. See
+[why Drillip keeps access management outside the tracker](docs/explanation/operating-model.md#why-drillip-keeps-access-management-outside-the-tracker).
+
 Documentation in this checkout describes the source version. Runnable release
 examples explicitly pin v0.3.14, whose CLI differs. For the current server-based
 CLI, follow [switch existing CLI commands to server access](docs/how-to/upgrade-cli.md).

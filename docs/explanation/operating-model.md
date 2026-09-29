@@ -4,6 +4,21 @@ A Drillip instance owns one SQLite database and one notification and telemetry
 configuration. Its SDK senders, API callers, and operators share that instance's
 error history. This keeps a tracker for one service small and easy to deploy.
 
+## Why Drillip keeps access management outside the tracker
+
+One reason Drillip exists is to let a service use Sentry SDKs for error reporting
+without adding another application-level user-management system to its operation.
+Its intended operators already control access to the service's host or container,
+or reach it through authenticated SSH. Drillip reuses that access instead of
+asking them to administer another set of identities and permissions.
+
+Platforms such as [Sentry](https://docs.sentry.io/organization/membership/) and
+[GlitchTip](https://glitchtip.com/documentation/getting-started) provide their own
+organization and team-membership models. Drillip targets deployments whose trusted
+operators already share the access they need. Keeping user, team, and role
+administration outside the tracker reduces the setup and ongoing management
+needed for that use case, while retaining Sentry SDK event ingestion.
+
 ## Choose what belongs together
 
 Use one instance for a service whose replicas should share grouping, resolution,
