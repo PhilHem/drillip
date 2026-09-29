@@ -28,7 +28,7 @@ def start():
     assert len(containers) == 1
     container = containers[0]
     assert run("docker", "inspect", "--format", "{{.Config.StopTimeout}}", container).stdout.strip() == "40"
-    compose("exec", "--no-TTY", "app", "python", "/app/healthcheck.py", "drillip")
+    compose("exec", "--no-TTY", "app", "drillip", "health")
     return container
 
 

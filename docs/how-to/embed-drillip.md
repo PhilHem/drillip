@@ -131,14 +131,14 @@ default healthcheck tests only the application: `healthy` means the application
 can serve requests, even if error reporting is unavailable. An application outage
 makes the container `unhealthy` independently of Drillip's state.
 
-Check Drillip separately with the same probe's `drillip` target:
+Check Drillip separately with its built-in health command:
 
 ```bash
-docker compose exec app python /app/healthcheck.py drillip
+docker compose exec app drillip health
 ```
 
-It queries Drillip's `/-/healthy` endpoint and prints `drillip: ok` with exit code
-0, or `drillip: unavailable` with a nonzero exit code. Have your monitoring run
+It queries Drillip's `/-/healthy` endpoint and prints `ok` with exit code
+0, or an error on stderr with a nonzero exit code. Have your monitoring run
 this diagnostic separately and alert on failure; application health alone does
 not report a tracker outage. Supervisor also logs process failures.
 Docker alone does not restart a container merely because its healthcheck fails.
@@ -159,7 +159,7 @@ docker compose exec app supervisorctl -c /app/supervisord.conf start drillip
 ```
 
 For image or environment changes, replace the container and retain its volume.
-Confirm that the Drillip probe returns `drillip: ok`, send a test exception from
+Confirm that the Drillip probe returns `ok`, send a test exception from
 your application, and check `drillip top` for receipt. SDK event IDs alone do not prove
 delivery. Events emitted while Drillip is down may be lost; this setup does not
 provide a durable SDK queue.

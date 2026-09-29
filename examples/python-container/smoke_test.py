@@ -70,7 +70,8 @@ def pid(program):
 
 
 def probe(target):
-    return docker("exec", NAME, "python", "/app/healthcheck.py", target, check=False)
+    command = ["drillip", "health"] if target == "drillip" else ["python", "/app/healthcheck.py"]
+    return docker("exec", NAME, *command, check=False)
 
 
 def last_healthcheck():
@@ -145,7 +146,7 @@ try:
     wait_for("application starts despite tracker startup failure", app_available)
     wait_for("application healthy despite tracker startup failure", lambda: health() == "healthy")
     diagnosis = probe("drillip")
-    assert diagnosis.returncode != 0 and "drillip: unavailable" in diagnosis.stderr
+    assert diagnosis.returncode != 0 and "unhealthy" in diagnosis.stderr
     wait_for("failed tracker reaches FATAL", lambda: "FATAL" in docker(
         "exec", NAME, "supervisorctl", "-c", "/app/supervisord.conf", "status", "drillip", check=False).stdout)
     logs = docker("logs", NAME)

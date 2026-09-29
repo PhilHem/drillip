@@ -34,10 +34,10 @@ Container health describes the Python service. Confirm that the embedded tracker
 is ready too:
 
 ```bash
-docker compose exec app python /app/healthcheck.py drillip
+docker compose exec app drillip health
 ```
 
-Expect `drillip: ok`. If the probe reports `drillip: unavailable`, inspect the
+Expect `ok`. If the probe reports an error, inspect the
 container logs and repeat the probe before sending an event. Python remains
 available during a tracker outage; error reporting is checked separately.
 

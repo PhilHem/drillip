@@ -7,7 +7,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"time"
 
 	"github.com/PhilHem/drillip/internal/adapter/in/cli"
 	integrations "github.com/PhilHem/drillip/internal/adapter/out/observability"
@@ -52,6 +54,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 
 	if remaining[0] == "health" {
+		if len(remaining) != 1 {
+			return fmt.Errorf("usage: drillip health")
+		}
 		return runHealthCmd(ctx, cfg, stdout)
 	}
 
@@ -102,7 +107,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 }
 
 func runHealthCmd(ctx context.Context, cfg config, stdout io.Writer) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+cfg.Addr+"/-/healthy", nil)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, serverURL(cfg.Addr)+"/-/healthy", nil)
 	if err != nil {
 		return fmt.Errorf("unhealthy: %w", err)
 	}
@@ -116,4 +123,19 @@ func runHealthCmd(ctx context.Context, cfg config, stdout io.Writer) error {
 	}
 	_, err = fmt.Fprintln(stdout, "ok")
 	return err
+}
+
+// serverURL turns a listen address into a connectable HTTP target.
+func serverURL(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err == nil {
+		if host == "" || host == "0.0.0.0" {
+			host = "127.0.0.1"
+		}
+		if host == "::" {
+			host = "::1"
+		}
+		addr = net.JoinHostPort(host, port)
+	}
+	return "http://" + addr
 }

@@ -3,11 +3,14 @@ package bootstrap
 import (
 	"bytes"
 	"context"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRunGlobalFlags(t *testing.T) {
@@ -91,6 +94,42 @@ func TestRunCommandErrors(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		if err := Run(context.Background(), args, &stdout, &stderr); err != nil {
 			t.Fatalf("%v: %v", args, err)
+		}
+	}
+}
+
+func TestHealthDeadlineAndWildcardTarget(t *testing.T) {
+	t.Setenv("DRILLIP_DB", filepath.Join(t.TempDir(), "missing", "errors.db"))
+	for _, stalled := range []bool{false, true} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if stalled {
+				<-r.Context().Done()
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		_, port, _ := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))
+		var stdout, stderr bytes.Buffer
+		start := time.Now()
+		err := Run(context.Background(), []string{"--addr", "0.0.0.0:" + port, "health"}, &stdout, &stderr)
+		srv.Close()
+		if stalled {
+			if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 4*time.Second {
+				t.Fatalf("deadline: %v after %v", err, time.Since(start))
+			}
+		} else if err != nil || stdout.String() != "ok\n" {
+			t.Fatalf("wildcard target: %v, %q", err, stdout.String())
+		}
+	}
+}
+
+func TestServerURL(t *testing.T) {
+	for addr, want := range map[string]string{
+		":8300": "http://127.0.0.1:8300", "0.0.0.0:8300": "http://127.0.0.1:8300",
+		"[::]:8300": "http://[::1]:8300", "example.com:8300": "http://example.com:8300",
+	} {
+		if got := serverURL(addr); got != want {
+			t.Errorf("%s: %s, want %s", addr, got, want)
 		}
 	}
 }
