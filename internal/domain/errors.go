@@ -1,6 +1,15 @@
 package domain
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+var (
+	ErrErrorNotFound        = errors.New("error not found")
+	ErrAmbiguousFingerprint = errors.New("ambiguous fingerprint")
+	ErrInvalidFingerprint   = errors.New("invalid fingerprint")
+)
 
 // ListFilter holds optional filters for error list queries.
 type ListFilter struct {
@@ -100,7 +109,7 @@ type SilenceEntry struct {
 // ResolveResult holds the outcome of a manual resolve operation.
 type ResolveResult struct {
 	Matched     int64
-	Fingerprint string // full fingerprint of the first matched error
+	Fingerprint string // full fingerprint of the matched error
 	ResolvedAt  string
 	Resolved    []ResolvedError // details of resolved errors
 }

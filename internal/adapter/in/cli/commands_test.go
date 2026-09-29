@@ -2,6 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"errors"
+	"github.com/PhilHem/drillip/internal/domain"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -445,7 +448,7 @@ func TestRunResolveNotFound(t *testing.T) {
 
 	var buf bytes.Buffer
 	err := c.RunResolve([]string{"0000000000000000"}, &buf)
-	if err == nil || !strings.Contains(err.Error(), "no unresolved") {
+	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("expected not found message: %s", err)
 	}
 }
@@ -478,6 +481,7 @@ func TestRunTopShowsState(t *testing.T) {
 
 func TestRunSilence(t *testing.T) {
 	s := setupStore(t)
+	insertTestError(t, s, "abc123", "Error", "failure", "v1")
 	c := testCLI(s)
 
 	var buf bytes.Buffer
@@ -494,6 +498,7 @@ func TestRunSilence(t *testing.T) {
 
 func TestRunSilenceWithDuration(t *testing.T) {
 	s := setupStore(t)
+	insertTestError(t, s, "d0a123", "Error", "failure", "v1")
 	c := testCLI(s)
 
 	var buf bytes.Buffer
@@ -510,6 +515,7 @@ func TestRunSilenceWithDuration(t *testing.T) {
 
 func TestRunSilenceWithReason(t *testing.T) {
 	s := setupStore(t)
+	insertTestError(t, s, "a5b123", "Error", "failure", "v1")
 	c := testCLI(s)
 
 	var buf bytes.Buffer
@@ -572,6 +578,7 @@ func TestRunSilencesEmpty(t *testing.T) {
 
 func TestRunUnsilence(t *testing.T) {
 	s := setupStore(t)
+	insertTestError(t, s, "a0b0c123", "Error", "failure", "v1")
 	c := testCLI(s)
 
 	_ = s.Silence("a0b0c123", nil, "")
@@ -629,4 +636,54 @@ func TestShowTagDistribution(t *testing.T) {
 func testCLI(s *store.Store) *CLI {
 	app := service.New(s, nil, nil)
 	return &CLI{Errors: app, Correlation: app}
+}
+
+func TestCLIReferenceContract(t *testing.T) {
+	s := setupStore(t)
+	insertTestError(t, s, "abcd111111111111", "Error", "one", "v1")
+	insertTestError(t, s, "abcd222222222222", "Error", "two", "v1")
+	c := testCLI(s)
+	for _, command := range []func([]string, io.Writer) error{c.RunShow, c.RunTrend, c.RunReleases, c.RunCorrelate, c.RunResolve, c.RunSilence, c.RunUnsilence} {
+		var output bytes.Buffer
+		if err := command([]string{"abcd"}, &output); !errors.Is(err, domain.ErrAmbiguousFingerprint) {
+			t.Fatalf("ambiguous: %v", err)
+		}
+		if output.Len() != 0 {
+			t.Fatalf("failure wrote stdout: %s", &output)
+		}
+	}
+	var output bytes.Buffer
+	if err := c.RunSilence([]string{"abcd1"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if !s.IsSilenced("abcd111111111111") || s.IsSilenced("abcd222222222222") {
+		t.Fatal("wrong silence target")
+	}
+	if err := c.RunUnsilence([]string{"abcd1"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if s.IsSilenced("abcd111111111111") {
+		t.Fatal("unsilence did not expand prefix")
+	}
+	if err := c.RunResolve([]string{"abcd1"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	other, _ := s.GetDetail("abcd222222222222")
+	if other.ResolvedAt != "" {
+		t.Fatal("resolve changed multiple errors")
+	}
+}
+
+func TestRemoveLegacyOrphanSilence(t *testing.T) {
+	s := setupStore(t)
+	if err := s.Silence("dead12", nil, "legacy rule"); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := testCLI(s).RunUnsilence([]string{"dead12"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if s.IsSilenced("dead12") {
+		t.Fatal("legacy rule was not removed")
+	}
 }

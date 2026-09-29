@@ -375,7 +375,7 @@ func (s *Store) PruneExpiredSilences() (int64, error) {
 }
 
 // Resolve manually marks an error as resolved by fingerprint prefix.
-func (s *Store) Resolve(fpPrefix string) (domain.ResolveResult, error) {
+func (s *Store) Resolve(fp string) (domain.ResolveResult, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	tx, err := s.db.Begin()
@@ -386,8 +386,8 @@ func (s *Store) Resolve(fpPrefix string) (domain.ResolveResult, error) {
 
 	// Collect details before resolving
 	rows, err := tx.Query(
-		`SELECT fingerprint, type, value, level, count, first_seen, last_seen FROM errors WHERE fingerprint LIKE ?||'%' AND resolved_at IS NULL`,
-		fpPrefix,
+		`SELECT fingerprint, type, value, level, count, first_seen, last_seen FROM errors WHERE fingerprint = ? AND resolved_at IS NULL`,
+		fp,
 	)
 	if err != nil {
 		return domain.ResolveResult{}, err
@@ -415,8 +415,8 @@ func (s *Store) Resolve(fpPrefix string) (domain.ResolveResult, error) {
 	}
 
 	res, err := tx.Exec(
-		`UPDATE errors SET resolved_at = ? WHERE fingerprint LIKE ?||'%' AND resolved_at IS NULL`,
-		now, fpPrefix,
+		`UPDATE errors SET resolved_at = ? WHERE fingerprint = ? AND resolved_at IS NULL`,
+		now, fp,
 	)
 	if err != nil {
 		return domain.ResolveResult{}, err
@@ -484,10 +484,30 @@ func (s *Store) GetTagDistribution(fp string) map[string]domain.TagDist {
 
 // FindByPrefix resolves a fingerprint prefix to the full fingerprint.
 func (s *Store) FindByPrefix(prefix string) (string, error) {
-	var fullFP string
-	err := s.db.QueryRow("SELECT fingerprint FROM errors WHERE fingerprint LIKE ?||'%' LIMIT 1", prefix).Scan(&fullFP)
-	if err != nil {
-		return "", fmt.Errorf("not found: %s", prefix)
+	if !domain.ValidFingerprint(prefix) {
+		return "", domain.ErrInvalidFingerprint
 	}
-	return fullFP, nil
+	rows, err := s.db.Query("SELECT fingerprint FROM errors WHERE fingerprint LIKE ?||'%' LIMIT 2", prefix)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	var matches []string
+	for rows.Next() {
+		var fp string
+		if err := rows.Scan(&fp); err != nil {
+			return "", err
+		}
+		matches = append(matches, fp)
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	if len(matches) == 0 {
+		return "", fmt.Errorf("%w: %s", domain.ErrErrorNotFound, prefix)
+	}
+	if len(matches) > 1 {
+		return "", fmt.Errorf("%w: %s; use a longer fingerprint", domain.ErrAmbiguousFingerprint, prefix)
+	}
+	return matches[0], nil
 }

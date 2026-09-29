@@ -498,7 +498,8 @@ func (c *CLI) RunSilence(args []string, w io.Writer) error {
 		expiresAt = &t
 	}
 
-	if err := c.Errors.Silence(fp, expiresAt, *reason); err != nil {
+	fp, err := c.Errors.Silence(fp, expiresAt, *reason)
+	if err != nil {
 		return err
 	}
 
@@ -542,7 +543,8 @@ func (c *CLI) RunUnsilence(args []string, w io.Writer) error {
 	if !domain.ValidFingerprint(fp) {
 		return fmt.Errorf("invalid fingerprint: must be 1-16 hex characters")
 	}
-	if err := c.Errors.Unsilence(fp); err != nil {
+	fp, err := c.Errors.Unsilence(fp)
+	if err != nil {
 		return err
 	}
 	fmt.Fprintf(w, "unsilenced %s\n", fp)

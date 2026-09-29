@@ -347,6 +347,7 @@ func TestAPIResolveNotFound(t *testing.T) {
 
 func TestAPISilencePost(t *testing.T) {
 	s := setupStore(t)
+	seedReference(t, s, "abc123")
 	h := testHandler(s)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/0/silence/abc123/?duration=24h&reason=maintenance", nil)
@@ -378,6 +379,7 @@ func TestAPISilencePost(t *testing.T) {
 
 func TestAPISilencePermanent(t *testing.T) {
 	s := setupStore(t)
+	seedReference(t, s, "aaa0001111")
 	h := testHandler(s)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/0/silence/aaa0001111/", nil)
@@ -395,6 +397,7 @@ func TestAPISilencePermanent(t *testing.T) {
 
 func TestAPIUnsilenceDelete(t *testing.T) {
 	s := setupStore(t)
+	seedReference(t, s, "de1a23")
 	h := testHandler(s)
 
 	// First silence it
@@ -623,4 +626,18 @@ func TestAPICorrelateWithNth(t *testing.T) {
 func testHandler(s *store.Store) *Handler {
 	app := service.New(s, nil, nil)
 	return &Handler{Errors: app, Correlation: app, Notifications: app}
+}
+
+func seedReference(t *testing.T, s *store.Store, fp string) {
+	t.Helper()
+	result, err := s.StoreEvent(&domain.Event{Message: fp})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RawDB().Exec("UPDATE errors SET fingerprint = ? WHERE fingerprint = ?", fp, result.Fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RawDB().Exec("UPDATE occurrences SET fingerprint = ? WHERE fingerprint = ?", fp, result.Fingerprint); err != nil {
+		t.Fatal(err)
+	}
 }

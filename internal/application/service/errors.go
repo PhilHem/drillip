@@ -2,6 +2,7 @@
 package service
 
 import (
+	"errors"
 	"log/slog"
 	"time"
 
@@ -56,7 +57,11 @@ func (s *Errors) Ingest(event *domain.Event) (string, error) {
 }
 
 func (s *Errors) Resolve(prefix string) (domain.ResolveResult, error) {
-	result, err := s.store.Resolve(prefix)
+	fp, err := s.store.FindByPrefix(prefix)
+	if err != nil {
+		return domain.ResolveResult{}, err
+	}
+	result, err := s.store.Resolve(fp)
 	if err == nil && s.notifier != nil && len(result.Resolved) > 0 {
 		go s.notifier.NotifyResolved(result.Resolved)
 	}
@@ -101,7 +106,30 @@ func (s *Errors) GCOccurrences(before time.Time) (int64, error) { return s.store
 
 func (s *Errors) ListSilences() ([]domain.SilenceEntry, error) { return s.store.ListSilences() }
 
-func (s *Errors) Silence(fp string, expiresAt *time.Time, reason string) error {
-	return s.store.Silence(fp, expiresAt, reason)
+func (s *Errors) Silence(reference string, expiresAt *time.Time, reason string) (string, error) {
+	fp, err := s.store.FindByPrefix(reference)
+	if err != nil {
+		return "", err
+	}
+	return fp, s.store.Silence(fp, expiresAt, reason)
 }
-func (s *Errors) Unsilence(fp string) error { return s.store.Unsilence(fp) }
+func (s *Errors) Unsilence(reference string) (string, error) {
+	fp, err := s.store.FindByPrefix(reference)
+	// Older versions permitted silence rules without a corresponding error.
+	// Keep exact deletion of those rules available during migration.
+	if errors.Is(err, domain.ErrErrorNotFound) {
+		entries, listErr := s.store.ListSilences()
+		if listErr != nil {
+			return "", listErr
+		}
+		for _, entry := range entries {
+			if entry.Fingerprint == reference {
+				return reference, s.store.Unsilence(reference)
+			}
+		}
+	}
+	if err != nil {
+		return "", err
+	}
+	return fp, s.store.Unsilence(fp)
+}

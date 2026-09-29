@@ -29,6 +29,8 @@ func (r *eventRepository) StoreEvent(*domain.Event) (domain.StoreResult, error) 
 
 func (r *eventRepository) IsSilenced(string) bool { return r.silenced }
 
+func (r *eventRepository) FindByPrefix(fp string) (string, error) { return fp, r.err }
+
 func (r *eventRepository) Resolve(string) (domain.ResolveResult, error) {
 	return r.resolved, r.err
 }

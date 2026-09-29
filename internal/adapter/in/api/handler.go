@@ -111,13 +111,13 @@ func (h *Handler) HandleShow(w http.ResponseWriter, r *http.Request) {
 
 	fullFP, err := h.Errors.FindByPrefix(fp)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "not found")
+		writeLookupError(w, err)
 		return
 	}
 
 	detail, err := h.Errors.GetDetail(fullFP)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "not found")
+		writeLookupError(w, err)
 		return
 	}
 
@@ -205,7 +205,7 @@ func (h *Handler) HandleTrend(w http.ResponseWriter, r *http.Request) {
 
 	fullFP, err := h.Errors.FindByPrefix(fp)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "not found")
+		writeLookupError(w, err)
 		return
 	}
 
@@ -249,7 +249,7 @@ func (h *Handler) HandleReleases(w http.ResponseWriter, r *http.Request) {
 
 	fullFP, err := h.Errors.FindByPrefix(fp)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "not found")
+		writeLookupError(w, err)
 		return
 	}
 
@@ -323,7 +323,7 @@ func (h *Handler) HandleResolve(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.Errors.Resolve(fp)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal error")
+		writeLookupError(w, err)
 		return
 	}
 	if result.Matched == 0 {
@@ -361,8 +361,9 @@ func (h *Handler) HandleSilence(w http.ResponseWriter, r *http.Request) {
 			reason = reason[:500]
 		}
 
-		if err := h.Errors.Silence(fp, expiresAt, reason); err != nil {
-			writeError(w, http.StatusInternalServerError, "internal error")
+		fp, err := h.Errors.Silence(fp, expiresAt, reason)
+		if err != nil {
+			writeLookupError(w, err)
 			return
 		}
 
@@ -373,8 +374,9 @@ func (h *Handler) HandleSilence(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, resp)
 
 	case http.MethodDelete:
-		if err := h.Errors.Unsilence(fp); err != nil {
-			writeError(w, http.StatusInternalServerError, "internal error")
+		fp, err := h.Errors.Unsilence(fp)
+		if err != nil {
+			writeLookupError(w, err)
 			return
 		}
 		writeJSON(w, map[string]interface{}{"fingerprint": fp, "status": "unsilenced"})
@@ -479,7 +481,7 @@ func (h *Handler) HandleCorrelate(w http.ResponseWriter, r *http.Request) {
 
 	cr, err := h.Correlation.Correlate(inport.CorrelateQuery{Fingerprint: fp, Nth: nth})
 	if err != nil {
-		writeError(w, http.StatusNotFound, "not found")
+		writeLookupError(w, err)
 		return
 	}
 	cd := cr.Error
@@ -618,4 +620,19 @@ func writeError(w http.ResponseWriter, status int, message string) {
 func writeJSON(w http.ResponseWriter, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// writeLookupError keeps reference failures distinct from storage failures.
+func writeLookupError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, domain.ErrAmbiguousFingerprint):
+		writeError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, domain.ErrErrorNotFound):
+		writeError(w, http.StatusNotFound, "not found")
+	case errors.Is(err, domain.ErrInvalidFingerprint):
+		writeError(w, http.StatusBadRequest, "invalid fingerprint")
+	default:
+		slog.Error("error lookup", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+	}
 }
