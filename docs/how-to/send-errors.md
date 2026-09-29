@@ -42,7 +42,8 @@ These snippets configure an installed SDK; keep the SDK's imports and
 initialization in your application's startup code.
 
 Trigger an error that your SDK reports, then query
-`/api/0/recent/` on the Drillip server to check for a newly grouped error.
+`/api/0/recent/` on the Drillip server to check for a new
+[error group](../reference/glossary.md#error-error-group).
 Use `/api/0/top/` to find an existing group whose count increased instead.
 See the [HTTP API reference](../reference/http-api.md#query) for the query
 endpoints, and the [lifecycle explanation](../explanation/error-lifecycle.md)

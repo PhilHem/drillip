@@ -3,7 +3,7 @@
 For deployment choices, shared histories, server-based commands, and access
 boundaries, read [the operating model](operating-model.md).
 
-**Ingestion:** Sentry SDKs POST error events. Drillip parses the envelope, extracts the exception or message, sanitizes fields, computes a fingerprint from the exception type and stack frame location or from the message text, and stores it in SQLite. Duplicate fingerprints increment the count.
+**Ingestion:** Sentry SDKs POST error [events](../reference/glossary.md#event). Drillip parses the envelope, extracts the exception or message, sanitizes fields, computes a [fingerprint](../reference/glossary.md#fingerprint) from the exception type and stack frame location or from the message text, and stores it in SQLite. Duplicate fingerprints increment the count.
 
 **Notifications:** New errors and regressions (resolved errors that reappear) trigger email notifications. Emails include the exception, full stacktrace, request URL, user context, breadcrumbs, tags, and CLI commands to investigate further. Multiple errors within the digest window are batched into a single summary email. Failed sends are retried with exponential backoff. Silenced fingerprints are skipped.
 

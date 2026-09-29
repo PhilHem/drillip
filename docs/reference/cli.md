@@ -129,8 +129,9 @@ contract; see [the tutorial](../tutorials/python-container.md#build-and-start-th
 
 ## Fingerprints
 
-Fingerprint arguments accept 1–16 lowercase hexadecimal characters (`a-f`,
-`0-9`). All error operations accept a full fingerprint or a unique prefix.
+[Fingerprint](glossary.md#fingerprint) arguments accept 1–16 lowercase hexadecimal
+characters (`a-f`, `0-9`). All error operations accept a full fingerprint or a
+unique [prefix](glossary.md#prefix).
 An unknown reference fails; an ambiguous prefix fails and asks for a longer
 fingerprint. `show` prints the full fingerprint, and state changes target exactly
 one error. Silence creation also requires an existing error.

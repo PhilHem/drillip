@@ -55,12 +55,13 @@ fingerprint=$(
 printf '%s\n' "$fingerprint"
 ```
 
-The output is a 16-character hexadecimal fingerprint. You will use it to look
-up this error in the next steps.
+The output is a 16-character hexadecimal [fingerprint](../reference/glossary.md#fingerprint).
+You will use it to look up this error in the next steps.
 
 ## 3. Read the stored error
 
-Fetch the error and display its message, occurrence count, and state:
+Fetch the error and display its message, [occurrence](../reference/glossary.md#occurrence)
+count, and state:
 
 ```sh
 curl --fail --silent --show-error \

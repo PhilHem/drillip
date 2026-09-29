@@ -65,8 +65,8 @@ curl --silent --show-error --include http://127.0.0.1:18000/fail
 ```
 
 Expect HTTP 500 and a JSON response containing `Example checkout failed` and an
-`event_id`. The SDK assigns that ID before asynchronous delivery; check Drillip
-to confirm that it received the event:
+[`event_id`](../reference/glossary.md#sdk-event-id). The SDK assigns that ID before
+asynchronous delivery; check Drillip to confirm that it received the event:
 
 ```bash
 docker compose exec app drillip top
@@ -74,8 +74,8 @@ docker compose exec app drillip top
 
 Repeat the command after a moment if the list is still empty. You will see a
 `RuntimeError` with the message `Example checkout failed` and a count of 1.
-The fingerprint in this list identifies the grouped error; it differs from the
-SDK event ID.
+The [fingerprint](../reference/glossary.md#fingerprint) in this list identifies the
+grouped error; it differs from the SDK event ID.
 
 Call `/fail` again, then run `drillip top` again. The same error's count rises to 2.
 Both events came from the same exception location, so Drillip grouped them.
