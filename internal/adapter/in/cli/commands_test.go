@@ -227,18 +227,18 @@ func TestRunShowNotFound(t *testing.T) {
 	s := setupStore(t)
 	c := testCLI(s)
 	var buf bytes.Buffer
-	c.RunShow([]string{"0000000000000000"}, &buf)
-	if !strings.Contains(buf.String(), "not found") {
-		t.Fatalf("expected not found: %s", buf.String())
+	err := c.RunShow([]string{"0000000000000000"}, &buf)
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected not found: %s", err)
 	}
 }
 
 func TestRunShowNoArgs(t *testing.T) {
 	c := &CLI{}
 	var buf bytes.Buffer
-	c.RunShow(nil, &buf)
-	if !strings.Contains(buf.String(), "usage") {
-		t.Fatalf("expected usage: %s", buf.String())
+	err := c.RunShow(nil, &buf)
+	if err == nil || !strings.Contains(err.Error(), "usage") {
+		t.Fatalf("expected usage: %s", err)
 	}
 }
 
@@ -268,9 +268,9 @@ func TestRunTrendNotFound(t *testing.T) {
 	s := setupStore(t)
 	c := testCLI(s)
 	var buf bytes.Buffer
-	c.RunTrend([]string{"0000000000000000"}, &buf)
-	if !strings.Contains(buf.String(), "not found") {
-		t.Fatalf("expected not found: %s", buf.String())
+	err := c.RunTrend([]string{"0000000000000000"}, &buf)
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected not found: %s", err)
 	}
 }
 
@@ -330,9 +330,9 @@ func TestRunGC(t *testing.T) {
 func TestRunGCNoArgs(t *testing.T) {
 	c := &CLI{}
 	var buf bytes.Buffer
-	c.RunGC(nil, &buf)
-	if !strings.Contains(buf.String(), "usage") {
-		t.Fatalf("expected usage: %s", buf.String())
+	err := c.RunGC(nil, &buf)
+	if err == nil || !strings.Contains(err.Error(), "usage") {
+		t.Fatalf("expected usage: %s", err)
 	}
 }
 
@@ -341,9 +341,9 @@ func TestRunGCNoArgs(t *testing.T) {
 func TestRunCorrelateNoArgs(t *testing.T) {
 	c := &CLI{}
 	var buf bytes.Buffer
-	c.RunCorrelate(nil, &buf)
-	if !strings.Contains(buf.String(), "usage") {
-		t.Fatalf("expected usage: %s", buf.String())
+	err := c.RunCorrelate(nil, &buf)
+	if err == nil || !strings.Contains(err.Error(), "usage") {
+		t.Fatalf("expected usage: %s", err)
 	}
 }
 
@@ -372,9 +372,9 @@ func TestRunCorrelateNotFound(t *testing.T) {
 	s := setupStore(t)
 	c := testCLI(s)
 	var buf bytes.Buffer
-	c.RunCorrelate([]string{"0000000000000000"}, &buf)
-	if !strings.Contains(buf.String(), "not found") {
-		t.Fatalf("expected not found: %s", buf.String())
+	err := c.RunCorrelate([]string{"0000000000000000"}, &buf)
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected not found: %s", err)
 	}
 }
 
@@ -444,18 +444,18 @@ func TestRunResolveNotFound(t *testing.T) {
 	c := testCLI(s)
 
 	var buf bytes.Buffer
-	c.RunResolve([]string{"0000000000000000"}, &buf)
-	if !strings.Contains(buf.String(), "no unresolved") {
-		t.Fatalf("expected not found message: %s", buf.String())
+	err := c.RunResolve([]string{"0000000000000000"}, &buf)
+	if err == nil || !strings.Contains(err.Error(), "no unresolved") {
+		t.Fatalf("expected not found message: %s", err)
 	}
 }
 
 func TestRunResolveNoArgs(t *testing.T) {
 	c := &CLI{}
 	var buf bytes.Buffer
-	c.RunResolve(nil, &buf)
-	if !strings.Contains(buf.String(), "usage") {
-		t.Fatalf("expected usage: %s", buf.String())
+	err := c.RunResolve(nil, &buf)
+	if err == nil || !strings.Contains(err.Error(), "usage") {
+		t.Fatalf("expected usage: %s", err)
 	}
 }
 
@@ -536,9 +536,9 @@ func TestRunSilenceNoArgs(t *testing.T) {
 	c := testCLI(s)
 
 	var buf bytes.Buffer
-	c.RunSilence(nil, &buf)
-	if !strings.Contains(buf.String(), "usage") {
-		t.Fatalf("expected usage: %s", buf.String())
+	err := c.RunSilence(nil, &buf)
+	if err == nil || !strings.Contains(err.Error(), "usage") {
+		t.Fatalf("expected usage: %s", err)
 	}
 }
 
@@ -592,9 +592,9 @@ func TestRunUnsilenceNoArgs(t *testing.T) {
 	c := testCLI(s)
 
 	var buf bytes.Buffer
-	c.RunUnsilence(nil, &buf)
-	if !strings.Contains(buf.String(), "usage") {
-		t.Fatalf("expected usage: %s", buf.String())
+	err := c.RunUnsilence(nil, &buf)
+	if err == nil || !strings.Contains(err.Error(), "usage") {
+		t.Fatalf("expected usage: %s", err)
 	}
 }
 

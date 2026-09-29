@@ -54,12 +54,15 @@ func TestCorrelateCommandPreservesPartialResultsAndErrors(t *testing.T) {
 			return &domain.Correlation{Error: domain.CorrelateData{Fingerprint: "abcdef0123456789", Type: "CheckoutError"}}, nil
 		})}
 		var output bytes.Buffer
-		c.RunCorrelate([]string{"abcd"}, &output)
+		err := c.RunCorrelate([]string{"abcd"}, &output)
 		if failed {
-			if output.String() != "error not found: abcd\n" {
-				t.Fatalf("output = %q", output.String())
+			if err == nil || !strings.Contains(err.Error(), "error unavailable") || output.Len() != 0 {
+				t.Fatalf("error = %v, output = %q", err, output.String())
 			}
 			continue
+		}
+		if err != nil {
+			t.Fatal(err)
 		}
 		if !strings.Contains(output.String(), "CheckoutError") || strings.Contains(output.String(), "Occurrence:") {
 			t.Fatalf("partial output = %s", &output)

@@ -69,33 +69,36 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 
 	switch cmd {
 	case "top":
-		c.RunTop(args, stdout)
+		err = c.RunTop(args, stdout)
 	case "recent":
-		c.RunRecent(args, stdout)
+		err = c.RunRecent(args, stdout)
 	case "show":
-		c.RunShow(args, stdout)
+		err = c.RunShow(args, stdout)
 	case "trend":
-		c.RunTrend(args, stdout)
+		err = c.RunTrend(args, stdout)
 	case "correlate":
-		c.RunCorrelate(args, stdout)
+		err = c.RunCorrelate(args, stdout)
 	case "releases":
-		c.RunReleases(args, stdout)
+		err = c.RunReleases(args, stdout)
 	case "stats":
-		c.RunStats(args, stdout)
+		err = c.RunStats(args, stdout)
 	case "gc":
-		c.RunGC(args, stdout)
+		err = c.RunGC(args, stdout)
 	case "resolve":
-		c.RunResolve(args, stdout)
+		err = c.RunResolve(args, stdout)
 	case "silence":
-		c.RunSilence(args, stdout)
+		err = c.RunSilence(args, stdout)
 	case "silences":
-		c.RunSilences(args, stdout)
+		err = c.RunSilences(args, stdout)
 	case "unsilence":
-		c.RunUnsilence(args, stdout)
+		err = c.RunUnsilence(args, stdout)
 	default:
 		return fmt.Errorf("unknown command: %s\ncommands: serve, top, recent, show, trend, correlate, releases, stats, gc, resolve, silence, silences, unsilence, health", cmd)
 	}
-	return nil
+	if errors.Is(err, flag.ErrHelp) {
+		return nil
+	}
+	return err
 }
 
 func runHealthCmd(ctx context.Context, cfg config, stdout io.Writer) error {
