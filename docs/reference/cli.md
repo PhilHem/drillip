@@ -31,6 +31,12 @@ drillip --db /data/errors.db silence --reason "planned maintenance" 04827c012345
 Environment variables and defaults are listed in the
 [configuration reference](configuration.md).
 
+Successful commands, including help and empty result lists, exit with status 0.
+Invalid arguments, failed lookups, and failed operations exit with status 1 and
+report the error on stderr. Scripts should check the exit status rather than
+parse the human-readable output. Earlier versions could print an error and still
+exit successfully; automation relying on that behavior must handle failures now.
+
 ## Commands
 
 Angle brackets indicate required values; square brackets indicate optional

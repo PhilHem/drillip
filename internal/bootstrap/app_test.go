@@ -68,3 +68,29 @@ func TestRunUnknownCommand(t *testing.T) {
 		t.Fatalf("error = %v, want unknown command", err)
 	}
 }
+
+// Errors must reach main so scripts can use exit status instead of parsing output.
+func TestRunCommandErrors(t *testing.T) {
+	t.Setenv("DRILLIP_DB", filepath.Join(t.TempDir(), "errors.db"))
+	for _, args := range [][]string{
+		{"show"}, {"show", "nonsense"}, {"show", "0000000000000000"},
+		{"gc", "invalid"}, {"resolve"}, {"resolve", "0000000000000000"},
+		{"silence"}, {"unsilence"}, {"top", "--unknown"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if err := Run(context.Background(), args, &stdout, &stderr); err == nil {
+				t.Fatal("expected command failure")
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("failure wrote stdout: %q", stdout.String())
+			}
+		})
+	}
+	for _, args := range [][]string{{"top"}, {"top", "--help"}, {"silences"}} {
+		var stdout, stderr bytes.Buffer
+		if err := Run(context.Background(), args, &stdout, &stderr); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+	}
+}
