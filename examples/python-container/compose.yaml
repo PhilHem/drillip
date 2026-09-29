@@ -1,0 +1,14 @@
+name: drillip-python
+
+services:
+  app:
+    build: .
+    platform: linux/amd64
+    ports:
+      - "127.0.0.1:${APP_PORT:-18000}:8000"
+    volumes:
+      - drillip-data:/var/lib/drillip
+    stop_grace_period: 40s
+
+volumes:
+  drillip-data:
