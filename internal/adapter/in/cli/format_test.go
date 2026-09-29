@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestPrintTable(t *testing.T) {
@@ -150,3 +151,18 @@ func TestPrintHint(t *testing.T) {
 	}
 }
 
+func TestFormattingPreservesUTF8(t *testing.T) {
+	for _, name := range []string{"Error", "Stacktrace", "Übersicht", "状態"} {
+		var output bytes.Buffer
+		printSection(&output, name)
+		if !utf8.Valid(output.Bytes()) {
+			t.Fatalf("invalid section UTF-8: %q", output.Bytes())
+		}
+	}
+	for _, limit := range []int{0, 1, 2, 3, 4, 5, 8} {
+		text := truncate("Überprüfung 東京", limit)
+		if !utf8.ValidString(text) || utf8.RuneCountInString(text) > limit {
+			t.Fatalf("limit=%d result=%q", limit, text)
+		}
+	}
+}
