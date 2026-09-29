@@ -7,14 +7,15 @@ import (
 	"github.com/PhilHem/drillip/internal/domain"
 )
 
-// Queries provides error investigation views.
+// Queries provides complete error investigation views. Reference arguments accept
+// a full fingerprint or unique prefix; unknown, invalid, and ambiguous references
+// fail before the view is queried. Results carry the canonical fingerprint.
 type Queries interface {
 	ListTop(domain.ListFilter, int) ([]domain.ErrorSummary, error)
 	ListRecent(domain.ListFilter, time.Time) ([]domain.ErrorSummary, error)
-	FindByPrefix(string) (string, error)
 	GetDetail(string) (*domain.ErrorDetail, error)
-	GetTrend(string, time.Time) ([]domain.TrendBucket, error)
-	GetReleases(string) ([]domain.ReleaseStats, error)
+	GetTrend(string, time.Time) (domain.Trend, error)
+	GetReleases(string) (domain.Releases, error)
 	GetStats() (domain.OverviewStats, error)
 }
 

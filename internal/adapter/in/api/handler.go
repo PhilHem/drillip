@@ -109,13 +109,7 @@ func (h *Handler) HandleShow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fullFP, err := h.Errors.FindByPrefix(fp)
-	if err != nil {
-		writeLookupError(w, err)
-		return
-	}
-
-	detail, err := h.Errors.GetDetail(fullFP)
+	detail, err := h.Errors.GetDetail(fp)
 	if err != nil {
 		writeLookupError(w, err)
 		return
@@ -203,20 +197,14 @@ func (h *Handler) HandleTrend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fullFP, err := h.Errors.FindByPrefix(fp)
+	since := time.Now().UTC().Add(-24 * time.Hour)
+	trend, err := h.Errors.GetTrend(fp, since)
 	if err != nil {
 		writeLookupError(w, err)
 		return
 	}
 
-	since := time.Now().UTC().Add(-24 * time.Hour)
-	trendBuckets, err := h.Errors.GetTrend(fullFP, since)
-	if err != nil {
-		slog.Error("HandleTrend", "err", err)
-		writeError(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-
+	fullFP, trendBuckets := trend.Fingerprint, trend.Buckets
 	buckets := make([]apiBucket, len(trendBuckets))
 	for i, b := range trendBuckets {
 		buckets[i] = apiBucket{Hour: b.Hour, Count: b.Count}
@@ -247,19 +235,13 @@ func (h *Handler) HandleReleases(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fullFP, err := h.Errors.FindByPrefix(fp)
+	result, err := h.Errors.GetReleases(fp)
 	if err != nil {
 		writeLookupError(w, err)
 		return
 	}
 
-	releaseStats, err := h.Errors.GetReleases(fullFP)
-	if err != nil {
-		slog.Error("HandleReleases", "err", err)
-		writeError(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-
+	fullFP, releaseStats := result.Fingerprint, result.Releases
 	releases := make([]apiRelease, len(releaseStats))
 	for i, r := range releaseStats {
 		releases[i] = apiRelease{

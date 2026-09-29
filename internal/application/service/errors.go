@@ -88,16 +88,36 @@ func (s *Errors) ListRecent(f domain.ListFilter, since time.Time) ([]domain.Erro
 	return s.store.ListRecent(f, since)
 }
 
-func (s *Errors) FindByPrefix(prefix string) (string, error) { return s.store.FindByPrefix(prefix) }
-
-func (s *Errors) GetDetail(fp string) (*domain.ErrorDetail, error) { return s.store.GetDetail(fp) }
-
-func (s *Errors) GetTrend(fp string, since time.Time) ([]domain.TrendBucket, error) {
-	return s.store.GetTrend(fp, since)
+func (s *Errors) GetDetail(reference string) (*domain.ErrorDetail, error) {
+	fp, err := s.store.FindByPrefix(reference)
+	if err != nil {
+		return nil, err
+	}
+	return s.store.GetDetail(fp)
 }
 
-func (s *Errors) GetReleases(fp string) ([]domain.ReleaseStats, error) {
-	return s.store.GetReleases(fp)
+func (s *Errors) GetTrend(reference string, since time.Time) (domain.Trend, error) {
+	fp, err := s.store.FindByPrefix(reference)
+	if err != nil {
+		return domain.Trend{}, err
+	}
+	buckets, err := s.store.GetTrend(fp, since)
+	if err != nil {
+		return domain.Trend{}, err
+	}
+	return domain.Trend{Fingerprint: fp, Buckets: buckets}, nil
+}
+
+func (s *Errors) GetReleases(reference string) (domain.Releases, error) {
+	fp, err := s.store.FindByPrefix(reference)
+	if err != nil {
+		return domain.Releases{}, err
+	}
+	releases, err := s.store.GetReleases(fp)
+	if err != nil {
+		return domain.Releases{}, err
+	}
+	return domain.Releases{Fingerprint: fp, Releases: releases}, nil
 }
 
 func (s *Errors) GetStats() (domain.OverviewStats, error) { return s.store.GetStats() }
