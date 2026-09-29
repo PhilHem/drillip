@@ -121,16 +121,12 @@ func (c *CLI) RunShow(args []string, w io.Writer) error {
 		return fmt.Errorf("invalid fingerprint: must be 1-16 hex characters")
 	}
 
-	fullFP, err := c.Errors.FindByPrefix(fp)
+	d, err := c.Errors.GetDetail(fp)
 	if err != nil {
 		return fmt.Errorf("error %s: %w", fp, err)
 	}
 
-	d, err := c.Errors.GetDetail(fullFP)
-	if err != nil {
-		return fmt.Errorf("error %s: %w", fp, err)
-	}
-
+	fullFP := d.Fingerprint
 	first, _ := time.Parse(time.RFC3339, d.FirstSeen)
 	last, _ := time.Parse(time.RFC3339, d.LastSeen)
 
@@ -233,19 +229,14 @@ func (c *CLI) RunTrend(args []string, w io.Writer) error {
 		return fmt.Errorf("invalid fingerprint: must be 1-16 hex characters")
 	}
 
-	// Resolve full fingerprint
-	fullFP, err := c.Errors.FindByPrefix(fp)
-	if err != nil {
-		return fmt.Errorf("error %s: %w", fp, err)
-	}
-
 	// Query occurrences grouped by hour for last 24h
 	since := time.Now().UTC().Add(-24 * time.Hour)
-	buckets, err := c.Errors.GetTrend(fullFP, since)
+	trend, err := c.Errors.GetTrend(fp, since)
 	if err != nil {
 		return err
 	}
 
+	fullFP, buckets := trend.Fingerprint, trend.Buckets
 	if len(buckets) == 0 {
 		fmt.Fprintf(w, "no occurrences in the last 24h for %s\n", fullFP[:8])
 		return nil
@@ -377,17 +368,12 @@ func (c *CLI) RunReleases(args []string, w io.Writer) error {
 		return fmt.Errorf("invalid fingerprint: must be 1-16 hex characters")
 	}
 
-	// Resolve full fingerprint
-	fullFP, err := c.Errors.FindByPrefix(fp)
-	if err != nil {
-		return fmt.Errorf("error %s: %w", fp, err)
-	}
-
-	releases, err := c.Errors.GetReleases(fullFP)
+	result, err := c.Errors.GetReleases(fp)
 	if err != nil {
 		return err
 	}
 
+	fullFP, releases := result.Fingerprint, result.Releases
 	if len(releases) == 0 {
 		fmt.Fprintf(w, "no occurrences for %s\n", fullFP[:8])
 		return nil

@@ -89,3 +89,12 @@ imports within `internal/` against the layer rules. It runs as part of the
 Go tests and reports imports that cross a forbidden boundary.
 
 See [Contributing](../../CONTRIBUTING.md) for build and validation commands.
+
+### Complete investigation operations
+
+Application queries accept a full fingerprint or unique prefix and return a
+complete view with its canonical fingerprint, including an empty trend or release
+history. The service owns reference resolution. CLI and HTTP adapters call one
+operation and render the result; they never call `FindByPrefix` first. The
+repository still exposes exact-fingerprint reads and reference lookup as internal
+storage operations.

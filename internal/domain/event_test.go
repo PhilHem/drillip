@@ -306,12 +306,12 @@ func TestValidFingerprint(t *testing.T) {
 	}{
 		{"", false},
 		{"abc123", true},
-		{"0123456789abcdef", true},  // 16 chars — max
+		{"0123456789abcdef", true},   // 16 chars — max
 		{"0123456789abcdef0", false}, // 17 chars — too long
-		{"ABCDEF", false},           // uppercase not allowed
-		{"xyz", false},              // non-hex
-		{"abc 123", false},          // space
-		{"a", true},                 // single char
+		{"ABCDEF", false},            // uppercase not allowed
+		{"xyz", false},               // non-hex
+		{"abc 123", false},           // space
+		{"a", true},                  // single char
 	}
 	for _, tc := range cases {
 		got := ValidFingerprint(tc.input)

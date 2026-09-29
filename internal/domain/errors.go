@@ -125,3 +125,15 @@ type TagValue struct {
 type TagDist struct {
 	Values []TagValue `json:"values"`
 }
+
+// Trend is an occurrence histogram for one uniquely identified error.
+type Trend struct {
+	Fingerprint string
+	Buckets     []TrendBucket
+}
+
+// Releases is the retained release history for one uniquely identified error.
+type Releases struct {
+	Fingerprint string
+	Releases    []ReleaseStats
+}
