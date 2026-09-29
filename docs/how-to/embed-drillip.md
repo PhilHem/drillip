@@ -86,11 +86,26 @@ the application even if the tracker is unavailable. Your SDK integration must
 also tolerate unavailable error reporting.
 
 Keep Drillip at priority 10 and the application at priority 20: Supervisor starts
-lower priorities first and stops them last. With `autorestart=true`, it restarts
-processes that exit after reaching `RUNNING`. Repeated failures during the
-`startsecs` window exhaust `startretries` and leave a process in `FATAL`; there is
-no unlimited retry in that state. See
-[Supervisor's process settings](https://supervisord.org/configuration.html#program-x-section-settings).
+lower priorities first and stops them last. The example uses the following
+recovery policy for each supervised process:
+
+| Situation | Automatic behavior | Operator action |
+|---|---|---|
+| A process exits after reaching `RUNNING` | `autorestart=true` restarts it, including after exit code 0. There is no retry limit for exits from `RUNNING`. | Inspect logs if it keeps restarting. |
+| A process cannot be spawned or exits before `startsecs=1` | Supervisor retries startup with increasing delays. When `startretries=3` is exhausted, the process enters `FATAL` and retries stop. | Fix the cause, then explicitly start the process or replace the container if its configuration changed. |
+| Drillip is running but its HTTP endpoint is unavailable | Supervisor does not restart it just because its probe fails. Application health remains independent. | Alert on the separate Drillip probe and investigate logs. Restart Drillip after addressing the cause if needed. |
+| An operator stops a process through `supervisorctl stop` | The process stays `STOPPED`; `autorestart` does not undo an explicit stop. | Use `supervisorctl start` when ready to resume it. |
+
+`RUNNING` means the managed process has stayed up for `startsecs`, not that its
+HTTP endpoint is ready. The application's readiness wrapper is part of that
+process, so its waiting time also counts. Use the application healthcheck and
+the separate Drillip probe to check availability. See Supervisor's
+[process states](https://supervisord.org/subprocess.html#process-states) and
+[process settings](https://supervisord.org/configuration.html#program-x-section-settings).
+
+A child in `FATAL` does not stop Supervisor or exit the container. Check process
+status and logs using the commands below; container restart policies are not a
+substitute for this recovery policy.
 
 Handle SIGTERM in your application: stop accepting work, finish active work
 within a bounded time, and drain the SDK before exiting. The example calls
