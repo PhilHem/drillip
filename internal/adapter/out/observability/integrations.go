@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -140,8 +142,11 @@ func QueryVictoriaMetrics(baseURL string, ts time.Time) (*domain.MetricsSnapshot
 	baseAPI := strings.TrimRight(baseURL, "/") + "/api/v1/query"
 
 	for name, query := range queries {
-		url := fmt.Sprintf("%s?query=%s&time=%d", baseAPI, query, ts.Unix())
-		resp, err := httpClient.Get(url)
+		params := url.Values{
+			"query": {query},
+			"time":  {strconv.FormatInt(ts.Unix(), 10)},
+		}
+		resp, err := httpClient.Get(baseAPI + "?" + params.Encode())
 		if err != nil {
 			snap.Values[name] = "(error)"
 			continue
