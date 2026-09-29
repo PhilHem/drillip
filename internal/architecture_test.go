@@ -15,13 +15,15 @@ import (
 func TestArchitectureImports(t *testing.T) {
 	const module = "github.com/PhilHem/drillip/internal/"
 	rules := map[string][]string{
-		"domain/":               {"domain/"},
-		"application/port/in/":  {"domain/", "application/port/in/"},
-		"application/port/out/": {"domain/", "application/port/out/"},
-		"application/service/":  {"domain/", "application/port/in/", "application/port/out/", "application/service/"},
-		"adapter/in/":           {"domain/", "application/port/in/"},
-		"adapter/out/":          {"domain/", "application/port/out/"},
-		"bootstrap/":            {""},
+		"domain/":                 {"domain/"},
+		"application/port/in/":    {"domain/", "application/port/in/"},
+		"application/port/out/":   {"domain/", "application/port/out/"},
+		"application/service/":    {"domain/", "application/port/in/", "application/port/out/", "application/service/"},
+		"adapter/in/":             {"domain/", "application/port/in/", "adapter/httpwire/"},
+		"adapter/httpwire/":       {"domain/"},
+		"adapter/out/httpclient/": {"domain/", "application/port/in/", "adapter/httpwire/"},
+		"adapter/out/":            {"domain/", "application/port/out/"},
+		"bootstrap/":              {""},
 	}
 	err := filepath.WalkDir(".", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -32,10 +34,11 @@ func TestArchitectureImports(t *testing.T) {
 		}
 		path = filepath.ToSlash(path)
 		var allowed []string
+		matched := 0
 		for prefix, dependencies := range rules {
-			if strings.HasPrefix(path, prefix) {
+			if strings.HasPrefix(path, prefix) && len(prefix) > matched {
 				allowed = dependencies
-				break
+				matched = len(prefix)
 			}
 		}
 		if allowed == nil {

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"github.com/PhilHem/drillip/internal/domain"
 	"io"
@@ -94,7 +95,7 @@ func TestRunStats(t *testing.T) {
 	insertTestOccurrence(t, s, "aaaa111122223333", "v1.0.0", "", time.Now())
 
 	var buf bytes.Buffer
-	c.RunStats(nil, &buf)
+	runCommand(c, "stats", context.Background(), nil, &buf)
 	out := buf.String()
 	if !strings.Contains(out, "Unique errors:") {
 		t.Fatalf("missing unique count: %s", out)
@@ -108,7 +109,7 @@ func TestRunStatsEmpty(t *testing.T) {
 	s := setupStore(t)
 	c := testCLI(s)
 	var buf bytes.Buffer
-	c.RunStats(nil, &buf)
+	runCommand(c, "stats", context.Background(), nil, &buf)
 	if !strings.Contains(buf.String(), "0") {
 		t.Fatalf("expected 0 for empty db: %s", buf.String())
 	}
@@ -124,7 +125,7 @@ func TestRunTop(t *testing.T) {
 	insertTestError(t, s, "cccc111122223333", "IOError", "file not found", "v1.0.0")
 
 	var buf bytes.Buffer
-	c.RunTop(nil, &buf)
+	runCommand(c, "top", context.Background(), nil, &buf)
 	out := buf.String()
 	if !strings.Contains(out, "ValueError") {
 		t.Fatalf("missing ValueError: %s", out)
@@ -144,7 +145,7 @@ func TestRunTopEmpty(t *testing.T) {
 	s := setupStore(t)
 	c := testCLI(s)
 	var buf bytes.Buffer
-	c.RunTop(nil, &buf)
+	runCommand(c, "top", context.Background(), nil, &buf)
 	if !strings.Contains(buf.String(), "no errors") {
 		t.Fatalf("expected 'no errors' message: %s", buf.String())
 	}
@@ -158,7 +159,7 @@ func TestRunTopLimit(t *testing.T) {
 	insertTestError(t, s, "ffff111122223333", "Err3", "e3", "v1")
 
 	var buf bytes.Buffer
-	c.RunTop([]string{"-limit", "2"}, &buf)
+	runCommand(c, "top", context.Background(), []string{"-limit", "2"}, &buf)
 	out := buf.String()
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	// header + separator + 2 rows + blank + hint = at least 5 lines
@@ -182,7 +183,7 @@ func TestRunRecent(t *testing.T) {
 	insertTestError(t, s, "aaab111122223333", "RecentErr", "just happened", "v2.0.0")
 
 	var buf bytes.Buffer
-	c.RunRecent(nil, &buf)
+	runCommand(c, "recent", context.Background(), nil, &buf)
 	out := buf.String()
 	if !strings.Contains(out, "RecentErr") {
 		t.Fatalf("missing recent error: %s", out)
@@ -193,7 +194,7 @@ func TestRunRecentEmpty(t *testing.T) {
 	s := setupStore(t)
 	c := testCLI(s)
 	var buf bytes.Buffer
-	c.RunRecent(nil, &buf)
+	runCommand(c, "recent", context.Background(), nil, &buf)
 	if !strings.Contains(buf.String(), "no new errors") {
 		t.Fatalf("expected empty message: %s", buf.String())
 	}
@@ -207,7 +208,7 @@ func TestRunShow(t *testing.T) {
 	insertTestError(t, s, "aaac111122223333", "ShowError", "show me", "v3.0.0")
 
 	var buf bytes.Buffer
-	c.RunShow([]string{"aaac"}, &buf) // prefix match
+	runCommand(c, "show", context.Background(), []string{"aaac"}, &buf) // prefix match
 	out := buf.String()
 	if !strings.Contains(out, "ShowError") {
 		t.Fatalf("missing error type: %s", out)
@@ -230,7 +231,7 @@ func TestRunShowNotFound(t *testing.T) {
 	s := setupStore(t)
 	c := testCLI(s)
 	var buf bytes.Buffer
-	err := c.RunShow([]string{"0000000000000000"}, &buf)
+	err := runCommand(c, "show", context.Background(), []string{"0000000000000000"}, &buf)
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("expected not found: %s", err)
 	}
@@ -239,7 +240,7 @@ func TestRunShowNotFound(t *testing.T) {
 func TestRunShowNoArgs(t *testing.T) {
 	c := &CLI{}
 	var buf bytes.Buffer
-	err := c.RunShow(nil, &buf)
+	err := runCommand(c, "show", context.Background(), nil, &buf)
 	if err == nil || !strings.Contains(err.Error(), "usage") {
 		t.Fatalf("expected usage: %s", err)
 	}
@@ -260,7 +261,7 @@ func TestRunTrend(t *testing.T) {
 	insertTestOccurrence(t, s, fp, "v1.0.0", "", now.Add(-20*time.Minute))
 
 	var buf bytes.Buffer
-	c.RunTrend([]string{"aaad"}, &buf)
+	runCommand(c, "trend", context.Background(), []string{"aaad"}, &buf)
 	out := buf.String()
 	if !strings.Contains(out, "█") {
 		t.Fatalf("missing bar chart: %s", out)
@@ -271,7 +272,7 @@ func TestRunTrendNotFound(t *testing.T) {
 	s := setupStore(t)
 	c := testCLI(s)
 	var buf bytes.Buffer
-	err := c.RunTrend([]string{"0000000000000000"}, &buf)
+	err := runCommand(c, "trend", context.Background(), []string{"0000000000000000"}, &buf)
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("expected not found: %s", err)
 	}
@@ -291,7 +292,7 @@ func TestRunReleases(t *testing.T) {
 	insertTestOccurrence(t, s, fp, "v2.0.0", "", now)
 
 	var buf bytes.Buffer
-	c.RunReleases([]string{"aaae"}, &buf)
+	runCommand(c, "releases", context.Background(), []string{"aaae"}, &buf)
 	out := buf.String()
 	if !strings.Contains(out, "v1.0.0") || !strings.Contains(out, "v2.0.0") {
 		t.Fatalf("missing releases: %s", out)
@@ -314,7 +315,7 @@ func TestRunGC(t *testing.T) {
 	insertTestOccurrence(t, s, fp, "v1.0.0", "", time.Now().UTC())
 
 	var buf bytes.Buffer
-	c.RunGC([]string{"24h"}, &buf)
+	runCommand(c, "gc", context.Background(), []string{"24h"}, &buf)
 	out := buf.String()
 	if !strings.Contains(out, "deleted 1") {
 		t.Fatalf("expected 1 deleted: %s", out)
@@ -333,7 +334,7 @@ func TestRunGC(t *testing.T) {
 func TestRunGCNoArgs(t *testing.T) {
 	c := &CLI{}
 	var buf bytes.Buffer
-	err := c.RunGC(nil, &buf)
+	err := runCommand(c, "gc", context.Background(), nil, &buf)
 	if err == nil || !strings.Contains(err.Error(), "usage") {
 		t.Fatalf("expected usage: %s", err)
 	}
@@ -344,7 +345,7 @@ func TestRunGCNoArgs(t *testing.T) {
 func TestRunCorrelateNoArgs(t *testing.T) {
 	c := &CLI{}
 	var buf bytes.Buffer
-	err := c.RunCorrelate(nil, &buf)
+	err := runCommand(c, "correlate", context.Background(), nil, &buf)
 	if err == nil || !strings.Contains(err.Error(), "usage") {
 		t.Fatalf("expected usage: %s", err)
 	}
@@ -358,7 +359,7 @@ func TestRunCorrelateNoIntegrations(t *testing.T) {
 	insertTestOccurrence(t, s, fp, "v1.0.0", "", time.Now().UTC())
 
 	var buf bytes.Buffer
-	c.RunCorrelate([]string{fp[:4]}, &buf)
+	runCommand(c, "correlate", context.Background(), []string{fp[:4]}, &buf)
 	out := buf.String()
 	if !strings.Contains(out, "CorrelateErr") {
 		t.Fatalf("missing error type: %s", out)
@@ -375,7 +376,7 @@ func TestRunCorrelateNotFound(t *testing.T) {
 	s := setupStore(t)
 	c := testCLI(s)
 	var buf bytes.Buffer
-	err := c.RunCorrelate([]string{"0000000000000000"}, &buf)
+	err := runCommand(c, "correlate", context.Background(), []string{"0000000000000000"}, &buf)
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("expected not found: %s", err)
 	}
@@ -390,7 +391,7 @@ func TestRunTopWithTagFilter(t *testing.T) {
 	insertTestErrorWithTags(t, s, "aab1222233334444", "TagErr2", "on web-2", "v1.0.0", `{"server":"web-2"}`)
 
 	var buf bytes.Buffer
-	c.RunTop([]string{"--tag", "server=web-1"}, &buf)
+	runCommand(c, "top", context.Background(), []string{"--tag", "server=web-1"}, &buf)
 	out := buf.String()
 	if !strings.Contains(out, "TagErr1") {
 		t.Fatalf("missing TagErr1: %s", out)
@@ -407,7 +408,7 @@ func TestRunRecentWithTagFilter(t *testing.T) {
 	insertTestErrorWithTags(t, s, "aab3222233334444", "RecentTag2", "other recent", "v1.0.0", `{"endpoint":"/api/users"}`)
 
 	var buf bytes.Buffer
-	c.RunRecent([]string{"--tag", "endpoint=/api/orders"}, &buf)
+	runCommand(c, "recent", context.Background(), []string{"--tag", "endpoint=/api/orders"}, &buf)
 	out := buf.String()
 	if !strings.Contains(out, "RecentTag1") {
 		t.Fatalf("missing RecentTag1: %s", out)
@@ -426,7 +427,7 @@ func TestRunResolve(t *testing.T) {
 	insertTestError(t, s, fp, "ResolveErr", "needs resolving", "v1.0.0")
 
 	var buf bytes.Buffer
-	RunResolve([]string{"aab4"}, &buf, c.Errors.Resolve)
+	runCommand(c, "resolve", context.Background(), []string{"aab4"}, &buf)
 	out := buf.String()
 	if !strings.Contains(out, "resolved "+fp) {
 		t.Fatalf("expected resolve confirmation: %s", out)
@@ -447,7 +448,7 @@ func TestRunResolveNotFound(t *testing.T) {
 	c := testCLI(s)
 
 	var buf bytes.Buffer
-	err := RunResolve([]string{"0000000000000000"}, &buf, c.Errors.Resolve)
+	err := runCommand(c, "resolve", context.Background(), []string{"0000000000000000"}, &buf)
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("expected not found message: %s", err)
 	}
@@ -455,7 +456,7 @@ func TestRunResolveNotFound(t *testing.T) {
 
 func TestRunResolveNoArgs(t *testing.T) {
 	var buf bytes.Buffer
-	err := RunResolve(nil, &buf, nil)
+	err := runCommand((&CLI{}), "resolve", context.Background(), nil, &buf)
 	if err == nil || !strings.Contains(err.Error(), "usage") {
 		t.Fatalf("expected usage: %s", err)
 	}
@@ -469,7 +470,7 @@ func TestRunTopShowsState(t *testing.T) {
 	insertTestError(t, s, "aab5111122223333", "StateErr", "state test", "v1.0.0")
 
 	var buf bytes.Buffer
-	c.RunTop(nil, &buf)
+	runCommand(c, "top", context.Background(), nil, &buf)
 	out := buf.String()
 	if !strings.Contains(out, "STATE") {
 		t.Fatalf("missing STATE column header: %s", out)
@@ -484,7 +485,7 @@ func TestRunSilence(t *testing.T) {
 	c := testCLI(s)
 
 	var buf bytes.Buffer
-	c.RunSilence([]string{"abc123"}, &buf)
+	runCommand(c, "silence", context.Background(), []string{"abc123"}, &buf)
 	out := buf.String()
 	if !strings.Contains(out, "silenced abc123 permanently") {
 		t.Fatalf("expected permanent silence message: %s", out)
@@ -501,7 +502,7 @@ func TestRunSilenceWithDuration(t *testing.T) {
 	c := testCLI(s)
 
 	var buf bytes.Buffer
-	c.RunSilence([]string{"d0a123", "2h"}, &buf)
+	runCommand(c, "silence", context.Background(), []string{"d0a123", "2h"}, &buf)
 	out := buf.String()
 	if !strings.Contains(out, "silenced d0a123 until") {
 		t.Fatalf("expected timed silence message: %s", out)
@@ -518,7 +519,7 @@ func TestRunSilenceWithReason(t *testing.T) {
 	c := testCLI(s)
 
 	var buf bytes.Buffer
-	c.RunSilence([]string{"--reason", "maintenance", "a5b123"}, &buf)
+	runCommand(c, "silence", context.Background(), []string{"--reason", "maintenance", "a5b123"}, &buf)
 	out := buf.String()
 	if !strings.Contains(out, "silenced a5b123 permanently") {
 		t.Fatalf("expected permanent silence message: %s", out)
@@ -541,7 +542,7 @@ func TestRunSilenceNoArgs(t *testing.T) {
 	c := testCLI(s)
 
 	var buf bytes.Buffer
-	err := c.RunSilence(nil, &buf)
+	err := runCommand(c, "silence", context.Background(), nil, &buf)
 	if err == nil || !strings.Contains(err.Error(), "usage") {
 		t.Fatalf("expected usage: %s", err)
 	}
@@ -554,7 +555,7 @@ func TestRunSilences(t *testing.T) {
 	_ = s.Silence("a0e111", nil, "test reason")
 
 	var buf bytes.Buffer
-	c.RunSilences(nil, &buf)
+	runCommand(c, "silences", context.Background(), nil, &buf)
 	out := buf.String()
 	if !strings.Contains(out, "a0e111") {
 		t.Fatalf("missing fingerprint in silences: %s", out)
@@ -569,7 +570,7 @@ func TestRunSilencesEmpty(t *testing.T) {
 	c := testCLI(s)
 
 	var buf bytes.Buffer
-	c.RunSilences(nil, &buf)
+	runCommand(c, "silences", context.Background(), nil, &buf)
 	if !strings.Contains(buf.String(), "no active silences") {
 		t.Fatalf("expected empty message: %s", buf.String())
 	}
@@ -583,7 +584,7 @@ func TestRunUnsilence(t *testing.T) {
 	_ = s.Silence("a0b0c123", nil, "")
 
 	var buf bytes.Buffer
-	c.RunUnsilence([]string{"a0b0c123"}, &buf)
+	runCommand(c, "unsilence", context.Background(), []string{"a0b0c123"}, &buf)
 	if !strings.Contains(buf.String(), "unsilenced a0b0c123") {
 		t.Fatalf("expected unsilence confirmation: %s", buf.String())
 	}
@@ -598,7 +599,7 @@ func TestRunUnsilenceNoArgs(t *testing.T) {
 	c := testCLI(s)
 
 	var buf bytes.Buffer
-	err := c.RunUnsilence(nil, &buf)
+	err := runCommand(c, "unsilence", context.Background(), nil, &buf)
 	if err == nil || !strings.Contains(err.Error(), "usage") {
 		t.Fatalf("expected usage: %s", err)
 	}
@@ -616,7 +617,7 @@ func TestShowTagDistribution(t *testing.T) {
 	insertTestOccurrenceWithTags(t, s, fp, "v1.0.0", "", `{"server":"web-2"}`, now.Add(-2*time.Minute))
 
 	var buf bytes.Buffer
-	c.RunShow([]string{"aab6"}, &buf)
+	runCommand(c, "show", context.Background(), []string{"aab6"}, &buf)
 	out := buf.String()
 	if !strings.Contains(out, "Tag Distribution") {
 		t.Fatalf("missing tag distribution section: %s", out)
@@ -642,9 +643,9 @@ func TestCLIReferenceContract(t *testing.T) {
 	insertTestError(t, s, "abcd111111111111", "Error", "one", "v1")
 	insertTestError(t, s, "abcd222222222222", "Error", "two", "v1")
 	c := testCLI(s)
-	for _, command := range []func([]string, io.Writer) error{c.RunShow, c.RunTrend, c.RunReleases, c.RunCorrelate, func(args []string, w io.Writer) error { return RunResolve(args, w, c.Errors.Resolve) }, c.RunSilence, c.RunUnsilence} {
+	for _, command := range []func(context.Context, []string, io.Writer) error{commandRunner(c, "show"), commandRunner(c, "trend"), commandRunner(c, "releases"), commandRunner(c, "correlate"), commandRunner(c, "resolve"), commandRunner(c, "silence"), commandRunner(c, "unsilence")} {
 		var output bytes.Buffer
-		if err := command([]string{"abcd"}, &output); !errors.Is(err, domain.ErrAmbiguousFingerprint) {
+		if err := command(context.Background(), []string{"abcd"}, &output); !errors.Is(err, domain.ErrAmbiguousFingerprint) {
 			t.Fatalf("ambiguous: %v", err)
 		}
 		if output.Len() != 0 {
@@ -652,19 +653,19 @@ func TestCLIReferenceContract(t *testing.T) {
 		}
 	}
 	var output bytes.Buffer
-	if err := c.RunSilence([]string{"abcd1"}, &output); err != nil {
+	if err := runCommand(c, "silence", context.Background(), []string{"abcd1"}, &output); err != nil {
 		t.Fatal(err)
 	}
 	if !s.IsSilenced("abcd111111111111") || s.IsSilenced("abcd222222222222") {
 		t.Fatal("wrong silence target")
 	}
-	if err := c.RunUnsilence([]string{"abcd1"}, &output); err != nil {
+	if err := runCommand(c, "unsilence", context.Background(), []string{"abcd1"}, &output); err != nil {
 		t.Fatal(err)
 	}
 	if s.IsSilenced("abcd111111111111") {
 		t.Fatal("unsilence did not expand prefix")
 	}
-	if err := RunResolve([]string{"abcd1"}, &output, c.Errors.Resolve); err != nil {
+	if err := runCommand(c, "resolve", context.Background(), []string{"abcd1"}, &output); err != nil {
 		t.Fatal(err)
 	}
 	other, _ := s.GetDetail("abcd222222222222")
@@ -679,7 +680,7 @@ func TestRemoveLegacyOrphanSilence(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	if err := testCLI(s).RunUnsilence([]string{"dead12"}, &output); err != nil {
+	if err := runCommand(testCLI(s), "unsilence", context.Background(), []string{"dead12"}, &output); err != nil {
 		t.Fatal(err)
 	}
 	if s.IsSilenced("dead12") {

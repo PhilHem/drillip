@@ -2,6 +2,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"time"
@@ -56,7 +57,11 @@ func (s *Errors) Ingest(event *domain.Event) (string, error) {
 	return result.Fingerprint, nil
 }
 
-func (s *Errors) Resolve(prefix string) (domain.ResolveResult, error) {
+func (s *Errors) Resolve(ctx context.Context, prefix string) (domain.ResolveResult, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.ResolveResult{}, err
+	}
+
 	fp, err := s.store.FindByPrefix(prefix)
 	if err != nil {
 		return domain.ResolveResult{}, err
@@ -80,15 +85,27 @@ func (s *Errors) SendTestEmail() (string, error) {
 
 func (s *Errors) Ping() error { return s.store.Ping() }
 
-func (s *Errors) ListTop(f domain.ListFilter, limit int) ([]domain.ErrorSummary, error) {
+func (s *Errors) ListTop(ctx context.Context, f domain.ListFilter, limit int) ([]domain.ErrorSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	return s.store.ListTop(f, limit)
 }
 
-func (s *Errors) ListRecent(f domain.ListFilter, since time.Time) ([]domain.ErrorSummary, error) {
+func (s *Errors) ListRecent(ctx context.Context, f domain.ListFilter, since time.Time) ([]domain.ErrorSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	return s.store.ListRecent(f, since)
 }
 
-func (s *Errors) GetDetail(reference string) (*domain.ErrorDetail, error) {
+func (s *Errors) GetDetail(ctx context.Context, reference string) (*domain.ErrorDetail, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	fp, err := s.store.FindByPrefix(reference)
 	if err != nil {
 		return nil, err
@@ -96,7 +113,11 @@ func (s *Errors) GetDetail(reference string) (*domain.ErrorDetail, error) {
 	return s.store.GetDetail(fp)
 }
 
-func (s *Errors) GetTrend(reference string, since time.Time) (domain.Trend, error) {
+func (s *Errors) GetTrend(ctx context.Context, reference string, since time.Time) (domain.Trend, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.Trend{}, err
+	}
+
 	fp, err := s.store.FindByPrefix(reference)
 	if err != nil {
 		return domain.Trend{}, err
@@ -108,7 +129,11 @@ func (s *Errors) GetTrend(reference string, since time.Time) (domain.Trend, erro
 	return domain.Trend{Fingerprint: fp, Buckets: buckets}, nil
 }
 
-func (s *Errors) GetReleases(reference string) (domain.Releases, error) {
+func (s *Errors) GetReleases(ctx context.Context, reference string) (domain.Releases, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.Releases{}, err
+	}
+
 	fp, err := s.store.FindByPrefix(reference)
 	if err != nil {
 		return domain.Releases{}, err
@@ -120,20 +145,53 @@ func (s *Errors) GetReleases(reference string) (domain.Releases, error) {
 	return domain.Releases{Fingerprint: fp, Releases: releases}, nil
 }
 
-func (s *Errors) GetStats() (domain.OverviewStats, error) { return s.store.GetStats() }
+func (s *Errors) GetStats(ctx context.Context) (domain.OverviewStats, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.OverviewStats{}, err
+	}
 
-func (s *Errors) GCOccurrences(before time.Time) (int64, error) { return s.store.GCOccurrences(before) }
+	return s.store.GetStats()
+}
 
-func (s *Errors) ListSilences() ([]domain.SilenceEntry, error) { return s.store.ListSilences() }
+func (s *Errors) GCOccurrences(ctx context.Context, before time.Time) (int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 
-func (s *Errors) Silence(reference string, expiresAt *time.Time, reason string) (string, error) {
+	return s.store.GCOccurrences(before)
+}
+
+func (s *Errors) ListSilences(ctx context.Context) ([]domain.SilenceEntry, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	return s.store.ListSilences()
+}
+
+func (s *Errors) Silence(ctx context.Context, reference string, expiresAt *time.Time, reason string) (domain.SilenceResult, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.SilenceResult{}, err
+	}
+
 	fp, err := s.store.FindByPrefix(reference)
 	if err != nil {
+		return domain.SilenceResult{}, err
+	}
+	if expiresAt != nil {
+		applied := expiresAt.UTC().Truncate(time.Second)
+		expiresAt = &applied
+	}
+	if err := s.store.Silence(fp, expiresAt, reason); err != nil {
+		return domain.SilenceResult{}, err
+	}
+	return domain.SilenceResult{Fingerprint: fp, ExpiresAt: expiresAt}, nil
+}
+func (s *Errors) Unsilence(ctx context.Context, reference string) (string, error) {
+	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	return fp, s.store.Silence(fp, expiresAt, reason)
-}
-func (s *Errors) Unsilence(reference string) (string, error) {
+
 	fp, err := s.store.FindByPrefix(reference)
 	// Older versions permitted silence rules without a corresponding error.
 	// Keep exact deletion of those rules available during migration.

@@ -20,6 +20,11 @@ cd examples/python-container
 docker compose up --build --wait --wait-timeout 60
 ```
 
+The default image pins Drillip v0.3.14. To test the current checkout instead,
+from the repository root run `docker build -t drillip:local .`, then use
+`DRILLIP_IMAGE=drillip:local docker compose up --build --wait --wait-timeout 60`
+in the example directory. The CLI and embedded server then use the same build.
+
 Compose creates one container and a database volume, then waits for the service
 to become healthy. Keep this directory for the remaining commands. Check its state:
 

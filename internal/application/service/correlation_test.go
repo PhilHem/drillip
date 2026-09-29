@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"testing"
@@ -77,7 +78,7 @@ func (r *telemetryRecorder) Profile(at time.Time) ([]domain.ProfileEntry, error)
 func TestCorrelateResolvesPrefixAndSelectsOccurrence(t *testing.T) {
 	repo := correlationRepo()
 	telemetry := &telemetryRecorder{}
-	result, err := New(repo, nil, telemetry).Correlate(inport.CorrelateQuery{Fingerprint: "abcd", Nth: 2})
+	result, err := New(repo, nil, telemetry).Correlate(context.Background(), inport.CorrelateQuery{Fingerprint: "abcd", Nth: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +114,7 @@ func TestCorrelateReturnsErrorLookupFailures(t *testing.T) {
 				repo.detailErr = lookupErr
 			}
 			telemetry := &telemetryRecorder{}
-			result, err := New(repo, nil, telemetry).Correlate(inport.CorrelateQuery{Fingerprint: "abcd", Nth: 1})
+			result, err := New(repo, nil, telemetry).Correlate(context.Background(), inport.CorrelateQuery{Fingerprint: "abcd", Nth: 1})
 			if !errors.Is(err, lookupErr) || result != nil {
 				t.Fatalf("result = %+v, error = %v", result, err)
 			}
@@ -131,7 +132,7 @@ func TestCorrelateKeepsErrorWhenOccurrenceUnavailable(t *testing.T) {
 	repo := correlationRepo()
 	repo.occurrenceErr = errors.New("occurrence unavailable")
 	telemetry := &telemetryRecorder{}
-	result, err := New(repo, nil, telemetry).Correlate(inport.CorrelateQuery{Fingerprint: "abcd", Nth: 99})
+	result, err := New(repo, nil, telemetry).Correlate(context.Background(), inport.CorrelateQuery{Fingerprint: "abcd", Nth: 99})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +148,7 @@ func TestCorrelateKeepsOtherSourcesWhenOneFails(t *testing.T) {
 	for _, failing := range []string{"logs", "trace", "metrics", "profile"} {
 		t.Run(failing, func(t *testing.T) {
 			telemetry := &telemetryRecorder{failing: failing}
-			result, err := New(correlationRepo(), nil, telemetry).Correlate(inport.CorrelateQuery{Fingerprint: "abcd", Nth: 1})
+			result, err := New(correlationRepo(), nil, telemetry).Correlate(context.Background(), inport.CorrelateQuery{Fingerprint: "abcd", Nth: 1})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -177,7 +178,7 @@ func TestCorrelateSkipsSourcesWithoutRequiredContext(t *testing.T) {
 			repo := correlationRepo()
 			repo.occurrence = domain.Occurrence{Timestamp: tc.timestamp, TraceID: tc.traceID}
 			telemetry := &telemetryRecorder{}
-			result, err := New(repo, nil, telemetry).Correlate(inport.CorrelateQuery{Fingerprint: "abcd", Nth: 1})
+			result, err := New(repo, nil, telemetry).Correlate(context.Background(), inport.CorrelateQuery{Fingerprint: "abcd", Nth: 1})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -196,7 +197,7 @@ func TestCorrelateSkipsSourcesWithoutRequiredContext(t *testing.T) {
 
 func TestCorrelateWithoutTelemetryKeepsLocalContext(t *testing.T) {
 	repo := correlationRepo()
-	result, err := New(repo, nil, nil).Correlate(inport.CorrelateQuery{Fingerprint: "abcd", Nth: 1})
+	result, err := New(repo, nil, nil).Correlate(context.Background(), inport.CorrelateQuery{Fingerprint: "abcd", Nth: 1})
 	if err != nil {
 		t.Fatal(err)
 	}

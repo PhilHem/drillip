@@ -56,19 +56,8 @@ func runServe(ctx context.Context, cfg config) (err error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", healthHandler)
 	mux.HandleFunc("/api/", ingest.MakeHandler(app))
+	mux.Handle("/api/0/", apiHandler.Routes())
 	mux.HandleFunc("/-/healthy", healthHandler)
-	mux.HandleFunc("/api/0/top/", apiHandler.HandleTop)
-	mux.HandleFunc("/api/0/recent/", apiHandler.HandleRecent)
-	mux.HandleFunc("/api/0/show/", apiHandler.HandleShow)
-	mux.HandleFunc("/api/0/trend/", apiHandler.HandleTrend)
-	mux.HandleFunc("/api/0/releases/", apiHandler.HandleReleases)
-	mux.HandleFunc("/api/0/stats/", apiHandler.HandleStats)
-	mux.HandleFunc("/api/0/gc/", apiHandler.HandleGC)
-	mux.HandleFunc("/api/0/resolve/", apiHandler.HandleResolve)
-	mux.HandleFunc("/api/0/correlate/", apiHandler.HandleCorrelate)
-	mux.HandleFunc("/api/0/test-email/", apiHandler.HandleTestEmail)
-	mux.HandleFunc("/api/0/silence/", apiHandler.HandleSilence)
-	mux.HandleFunc("/api/0/silences/", apiHandler.HandleListSilences)
 
 	srv := &http.Server{Addr: cfg.Addr, Handler: mux}
 

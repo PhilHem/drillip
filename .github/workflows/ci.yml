@@ -8,11 +8,19 @@ on:
 jobs:
   embedded-python:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        drillip: [released, checkout]
+    env:
+      DRILLIP_IMAGE: ${{ matrix.drillip == 'checkout' && 'drillip:ci' || 'ghcr.io/philhem/drillip:v0.3.14' }}
     steps:
       - uses: actions/checkout@v6
+      - name: Build checkout image
+        if: matrix.drillip == 'checkout'
+        run: docker build -t drillip:ci .
       - name: Build embedded Python example
-        run: docker build --platform linux/amd64 -t drillip-python-example examples/python-container
+        run: docker build --platform linux/amd64 --build-arg DRILLIP_IMAGE="$DRILLIP_IMAGE" -t drillip-python-example examples/python-container
       - name: Exercise capture and process lifecycle
         run: python3 examples/python-container/smoke_test.py
       - name: Exercise Compose deployment

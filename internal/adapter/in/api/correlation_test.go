@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"github.com/PhilHem/drillip/internal/adapter/httpwire"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,7 +14,7 @@ import (
 
 type correlatorFunc func(inport.CorrelateQuery) (*domain.Correlation, error)
 
-func (f correlatorFunc) Correlate(query inport.CorrelateQuery) (*domain.Correlation, error) {
+func (f correlatorFunc) Correlate(_ context.Context, query inport.CorrelateQuery) (*domain.Correlation, error) {
 	return f(query)
 }
 
@@ -42,7 +44,7 @@ func TestCorrelateHandlerNeedsOnlyCorrelationPort(t *testing.T) {
 			if w.Code != http.StatusOK || calls != 1 {
 				t.Fatalf("status = %d, calls = %d", w.Code, calls)
 			}
-			var result apiCorrelation
+			var result httpwire.Correlation
 			if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
 				t.Fatal(err)
 			}

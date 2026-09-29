@@ -1,19 +1,31 @@
 # Configuration reference
 
+This describes the current checkout. `DRILLIP_SERVER` and the new CLI modes
+require a matching client/server build; see [the migration guide](../how-to/upgrade-cli.md).
+
 Drillip reads configuration from environment variables when it starts. All
 variables are optional. Unset or empty variables use the defaults below;
 `—` means no value is set.
 
-The global flags `--db` and `--addr` override `DRILLIP_DB` and `DRILLIP_ADDR`
-when given a non-empty value. Put these flags before the command, for example
-`drillip --db /data/errors.db --addr 0.0.0.0:8300 serve`.
+Server flags `serve --db` and `serve --listen` override `DRILLIP_DB` and
+`DRILLIP_ADDR`. Client `--server` overrides `DRILLIP_SERVER`. For example:
+`drillip serve --db /data/errors.db --listen 0.0.0.0:8300` and
+`drillip --server http://127.0.0.1:8300 top`.
+
+Legacy global `--addr` remains supported. Client target precedence is explicit
+`--server` or legacy `--addr` (mutually exclusive), then `DRILLIP_SERVER`, then
+legacy `DRILLIP_ADDR` converted to an HTTP URL, then `http://127.0.0.1:8300`.
+Wildcard legacy addresses map to loopback. Server listen configuration ignores
+`DRILLIP_SERVER`. Maintenance requires an explicit existing database path; see
+[CLI modes and migration](cli.md#local-maintenance).
 
 ## Core
 
 | Variable | Default | Description |
 |---|---|---|
-| `DRILLIP_DB` | `errors.db` | SQLite database path |
-| `DRILLIP_ADDR` | `127.0.0.1:8300` | Listen address |
+| `DRILLIP_DB` | `errors.db` | Server SQLite database path |
+| `DRILLIP_ADDR` | `127.0.0.1:8300` | Server listen address; explicit nonempty values also supply the legacy client target fallback |
+| `DRILLIP_SERVER` | — | HTTP/HTTPS client target; default target and precedence above |
 | `DRILLIP_PROJECT` | — | Project name shown in notifications |
 | `DRILLIP_LOG_LEVEL` | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
 
@@ -60,7 +72,7 @@ Notifications are sent for:
   SMTP delivery. Other stale errors are still resolved, but omitted from the email.
 - **Manual resolutions** — the HTTP API and normal `drillip resolve` send a
   summary for the matched unresolved error, even if it was not previously
-  notified. Explicit `drillip --offline resolve` does not send email.
+  notified. Explicit `drillip maintenance --db PATH resolve` does not send email.
 
 Resolution summaries are sent directly, outside the new-error digest and
 cooldown. Silencing a fingerprint suppresses new-error and regression emails;

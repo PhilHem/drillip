@@ -2,6 +2,7 @@
 package inport
 
 import (
+	"context"
 	"time"
 
 	"github.com/PhilHem/drillip/internal/domain"
@@ -11,21 +12,21 @@ import (
 // a full fingerprint or unique prefix; unknown, invalid, and ambiguous references
 // fail before the view is queried. Results carry the canonical fingerprint.
 type Queries interface {
-	ListTop(domain.ListFilter, int) ([]domain.ErrorSummary, error)
-	ListRecent(domain.ListFilter, time.Time) ([]domain.ErrorSummary, error)
-	GetDetail(string) (*domain.ErrorDetail, error)
-	GetTrend(string, time.Time) (domain.Trend, error)
-	GetReleases(string) (domain.Releases, error)
-	GetStats() (domain.OverviewStats, error)
+	ListTop(context.Context, domain.ListFilter, int) ([]domain.ErrorSummary, error)
+	ListRecent(context.Context, domain.ListFilter, time.Time) ([]domain.ErrorSummary, error)
+	GetDetail(context.Context, string) (*domain.ErrorDetail, error)
+	GetTrend(context.Context, string, time.Time) (domain.Trend, error)
+	GetReleases(context.Context, string) (domain.Releases, error)
+	GetStats(context.Context) (domain.OverviewStats, error)
 }
 
 // Commands changes error state and retention.
 type Commands interface {
-	Resolve(string) (domain.ResolveResult, error)
-	GCOccurrences(time.Time) (int64, error)
-	Silence(string, *time.Time, string) (string, error)
-	Unsilence(string) (string, error)
-	ListSilences() ([]domain.SilenceEntry, error)
+	Resolve(context.Context, string) (domain.ResolveResult, error)
+	GCOccurrences(context.Context, time.Time) (int64, error)
+	Silence(context.Context, string, *time.Time, string) (domain.SilenceResult, error)
+	Unsilence(context.Context, string) (string, error)
+	ListSilences(context.Context) ([]domain.SilenceEntry, error)
 }
 
 // Errors is the set of error operations exposed through the CLI and JSON API.

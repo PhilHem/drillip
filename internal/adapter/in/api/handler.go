@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/PhilHem/drillip/internal/adapter/httpwire"
+
 	inport "github.com/PhilHem/drillip/internal/application/port/in"
 	"github.com/PhilHem/drillip/internal/domain"
 )
@@ -19,44 +21,6 @@ type Handler struct {
 	Errors        inport.Errors
 	Correlation   inport.Correlator
 	Notifications inport.Notifications
-}
-
-type apiError struct {
-	Fingerprint string `json:"fingerprint"`
-	Count       int    `json:"count"`
-	Level       string `json:"level"`
-	Type        string `json:"type"`
-	Value       string `json:"value"`
-	LastSeen    string `json:"last_seen"`
-	ResolvedAt  string `json:"resolved_at,omitempty"`
-	State       string `json:"state"`
-}
-
-type apiErrorDetail struct {
-	Fingerprint string                    `json:"fingerprint"`
-	Count       int                       `json:"count"`
-	Level       string                    `json:"level"`
-	Type        string                    `json:"type"`
-	Value       string                    `json:"value"`
-	Release     string                    `json:"release,omitempty"`
-	Environment string                    `json:"environment,omitempty"`
-	Platform    string                    `json:"platform,omitempty"`
-	FirstSeen   string                    `json:"first_seen"`
-	LastSeen    string                    `json:"last_seen"`
-	ResolvedAt  string                    `json:"resolved_at,omitempty"`
-	State       string                    `json:"state"`
-	Stacktrace  json.RawMessage           `json:"stacktrace,omitempty"`
-	Breadcrumbs json.RawMessage           `json:"breadcrumbs,omitempty"`
-	User        json.RawMessage           `json:"user,omitempty"`
-	Tags        json.RawMessage           `json:"tags,omitempty"`
-	TagDist     map[string]domain.TagDist `json:"tag_distribution,omitempty"`
-}
-
-type apiStats struct {
-	UniqueErrors     int    `json:"unique_errors"`
-	TotalOccurrences int    `json:"total_occurrences"`
-	FirstSeen        string `json:"first_seen,omitempty"`
-	LastSeen         string `json:"last_seen,omitempty"`
 }
 
 func (h *Handler) HandleTop(w http.ResponseWriter, r *http.Request) {
@@ -73,16 +37,25 @@ func (h *Handler) HandleTop(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	summaries, err := h.Errors.ListTop(f, 25)
+	limit := 25
+	if value := r.URL.Query().Get("limit"); value != "" {
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 {
+			writeError(w, 400, "limit must be a positive integer")
+			return
+		}
+		limit = n
+	}
+	summaries, err := h.Errors.ListTop(r.Context(), f, limit)
 	if err != nil {
 		slog.Error("HandleTop", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	results := make([]apiError, len(summaries))
+	results := make([]httpwire.Error, len(summaries))
 	for i, s := range summaries {
-		results[i] = summaryToAPI(s)
+		results[i] = httpwire.FromSummary(s)
 	}
 
 	writeJSON(w, results)
@@ -109,13 +82,13 @@ func (h *Handler) HandleShow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	detail, err := h.Errors.GetDetail(fp)
+	detail, err := h.Errors.GetDetail(r.Context(), fp)
 	if err != nil {
 		writeLookupError(w, err)
 		return
 	}
 
-	writeJSON(w, detailToAPI(detail))
+	writeJSON(w, httpwire.FromDetail(detail))
 }
 
 func (h *Handler) HandleStats(w http.ResponseWriter, r *http.Request) {
@@ -124,14 +97,14 @@ func (h *Handler) HandleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stats, err := h.Errors.GetStats()
+	stats, err := h.Errors.GetStats(r.Context())
 	if err != nil {
 		slog.Error("HandleStats", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	writeJSON(w, apiStats{
+	writeJSON(w, httpwire.Stats{
 		UniqueErrors:     stats.UniqueErrors,
 		TotalOccurrences: stats.TotalOccurrences,
 		FirstSeen:        stats.FirstSeen,
@@ -155,7 +128,11 @@ func (h *Handler) HandleRecent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	since := time.Now().UTC().Add(-time.Duration(hours) * time.Hour)
+	since, err := queryTime(r, "since", "hours", time.Now().UTC().Add(-time.Duration(hours)*time.Hour))
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
 
 	var f domain.ListFilter
 	f.Level = r.URL.Query().Get("level")
@@ -165,24 +142,19 @@ func (h *Handler) HandleRecent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	summaries, err := h.Errors.ListRecent(f, since)
+	summaries, err := h.Errors.ListRecent(r.Context(), f, since)
 	if err != nil {
 		slog.Error("HandleRecent", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	results := make([]apiError, len(summaries))
+	results := make([]httpwire.Error, len(summaries))
 	for i, s := range summaries {
-		results[i] = summaryToAPI(s)
+		results[i] = httpwire.FromSummary(s)
 	}
 
 	writeJSON(w, results)
-}
-
-type apiBucket struct {
-	Hour  string `json:"hour"`
-	Count int    `json:"count"`
 }
 
 func (h *Handler) HandleTrend(w http.ResponseWriter, r *http.Request) {
@@ -197,30 +169,27 @@ func (h *Handler) HandleTrend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	since := time.Now().UTC().Add(-24 * time.Hour)
-	trend, err := h.Errors.GetTrend(fp, since)
+	since, err := queryTime(r, "since", "", time.Now().UTC().Add(-24*time.Hour))
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	trend, err := h.Errors.GetTrend(r.Context(), fp, since)
 	if err != nil {
 		writeLookupError(w, err)
 		return
 	}
 
 	fullFP, trendBuckets := trend.Fingerprint, trend.Buckets
-	buckets := make([]apiBucket, len(trendBuckets))
+	buckets := make([]httpwire.Bucket, len(trendBuckets))
 	for i, b := range trendBuckets {
-		buckets[i] = apiBucket{Hour: b.Hour, Count: b.Count}
+		buckets[i] = httpwire.Bucket{Hour: b.Hour, Count: b.Count}
 	}
 
 	writeJSON(w, map[string]interface{}{
 		"fingerprint": fullFP,
 		"buckets":     buckets,
 	})
-}
-
-type apiRelease struct {
-	Release   string `json:"release"`
-	Count     int    `json:"count"`
-	FirstSeen string `json:"first_seen"`
-	LastSeen  string `json:"last_seen"`
 }
 
 func (h *Handler) HandleReleases(w http.ResponseWriter, r *http.Request) {
@@ -235,16 +204,16 @@ func (h *Handler) HandleReleases(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.Errors.GetReleases(fp)
+	result, err := h.Errors.GetReleases(r.Context(), fp)
 	if err != nil {
 		writeLookupError(w, err)
 		return
 	}
 
 	fullFP, releaseStats := result.Fingerprint, result.Releases
-	releases := make([]apiRelease, len(releaseStats))
+	releases := make([]httpwire.Release, len(releaseStats))
 	for i, r := range releaseStats {
-		releases[i] = apiRelease{
+		releases[i] = httpwire.Release{
 			Release:   r.Release,
 			Count:     r.Count,
 			FirstSeen: r.FirstSeen,
@@ -258,37 +227,37 @@ func (h *Handler) HandleReleases(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-type apiGCResult struct {
-	Deleted   int64  `json:"deleted"`
-	Threshold string `json:"threshold"`
-}
-
 func (h *Handler) HandleGC(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
-	durStr := r.URL.Query().Get("older_than")
-	if durStr == "" {
-		writeError(w, http.StatusBadRequest, "missing older_than param (e.g., 7d, 30d, 24h)")
-		return
+	threshold := time.Time{}
+	if durStr := r.URL.Query().Get("older_than"); durStr != "" {
+		dur, err := domain.ParseDuration(durStr)
+		if err != nil {
+			writeError(w, 400, err.Error())
+			return
+		}
+		threshold = time.Now().UTC().Add(-dur)
 	}
-
-	dur, err := domain.ParseDuration(durStr)
+	threshold, err := queryTime(r, "before", "older_than", threshold)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeError(w, 400, err.Error())
 		return
 	}
-
-	threshold := time.Now().UTC().Add(-dur)
-	deleted, err := h.Errors.GCOccurrences(threshold)
+	if threshold.IsZero() {
+		writeError(w, 400, "missing before or older_than parameter")
+		return
+	}
+	deleted, err := h.Errors.GCOccurrences(r.Context(), threshold)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	writeJSON(w, apiGCResult{Deleted: deleted, Threshold: threshold.Format(time.RFC3339)})
+	writeJSON(w, httpwire.GCResult{Deleted: deleted, Threshold: threshold.Format(time.RFC3339)})
 }
 
 func (h *Handler) HandleResolve(w http.ResponseWriter, r *http.Request) {
@@ -303,7 +272,7 @@ func (h *Handler) HandleResolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.Errors.Resolve(fp)
+	result, err := h.Errors.Resolve(r.Context(), fp)
 	if err != nil {
 		writeLookupError(w, err)
 		return
@@ -338,25 +307,34 @@ func (h *Handler) HandleSilence(w http.ResponseWriter, r *http.Request) {
 			t := time.Now().UTC().Add(dur)
 			expiresAt = &t
 		}
+		if r.URL.Query().Has("expires_at") {
+			expiry, err := queryTime(r, "expires_at", "duration", time.Time{})
+			if err != nil {
+				writeError(w, 400, err.Error())
+				return
+			}
+			expiresAt = &expiry
+		}
 		reason := r.URL.Query().Get("reason")
 		if len(reason) > 500 {
 			reason = reason[:500]
 		}
 
-		fp, err := h.Errors.Silence(fp, expiresAt, reason)
+		result, err := h.Errors.Silence(r.Context(), fp, expiresAt, reason)
 		if err != nil {
 			writeLookupError(w, err)
 			return
 		}
 
-		resp := map[string]interface{}{"fingerprint": fp, "status": "silenced"}
+		resp := map[string]interface{}{"fingerprint": result.Fingerprint, "status": "silenced"}
+		expiresAt = result.ExpiresAt
 		if expiresAt != nil {
-			resp["expires_at"] = expiresAt.Format(time.RFC3339)
+			resp["expires_at"] = expiresAt.Format(time.RFC3339Nano)
 		}
 		writeJSON(w, resp)
 
 	case http.MethodDelete:
-		fp, err := h.Errors.Unsilence(fp)
+		fp, err := h.Errors.Unsilence(r.Context(), fp)
 		if err != nil {
 			writeLookupError(w, err)
 			return
@@ -368,28 +346,21 @@ func (h *Handler) HandleSilence(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-type apiSilence struct {
-	Fingerprint string `json:"fingerprint"`
-	CreatedAt   string `json:"created_at"`
-	ExpiresAt   string `json:"expires_at,omitempty"`
-	Reason      string `json:"reason,omitempty"`
-}
-
 func (h *Handler) HandleListSilences(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
-	entries, err := h.Errors.ListSilences()
+	entries, err := h.Errors.ListSilences(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	var results []apiSilence
+	var results []httpwire.Silence
 	for _, e := range entries {
-		results = append(results, apiSilence{
+		results = append(results, httpwire.Silence{
 			Fingerprint: e.Fingerprint,
 			CreatedAt:   e.CreatedAt,
 			ExpiresAt:   e.ExpiresAt,
@@ -401,46 +372,6 @@ func (h *Handler) HandleListSilences(w http.ResponseWriter, r *http.Request) {
 }
 
 // --- Correlate ---
-
-type apiCorrelation struct {
-	Fingerprint string            `json:"fingerprint"`
-	Type        string            `json:"type"`
-	Value       string            `json:"value"`
-	Occurrence  *apiOccurrence    `json:"occurrence,omitempty"`
-	Stacktrace  json.RawMessage   `json:"stacktrace,omitempty"`
-	Breadcrumbs json.RawMessage   `json:"breadcrumbs,omitempty"`
-	User        json.RawMessage   `json:"user,omitempty"`
-	Logs        []apiLogEntry     `json:"logs,omitempty"`
-	Trace       *apiTraceData     `json:"trace,omitempty"`
-	Metrics     map[string]string `json:"metrics,omitempty"`
-	Profile     []apiProfileEntry `json:"profile,omitempty"`
-}
-
-type apiOccurrence struct {
-	Nth       int    `json:"nth"`
-	Timestamp string `json:"timestamp"`
-	TraceID   string `json:"trace_id,omitempty"`
-}
-
-type apiLogEntry struct {
-	Timestamp string `json:"timestamp"`
-	Message   string `json:"message"`
-	Priority  string `json:"priority,omitempty"`
-}
-
-type apiTraceData struct {
-	ServiceName string         `json:"service_name"`
-	Spans       []apiTraceSpan `json:"spans"`
-}
-
-type apiTraceSpan struct {
-	OperationName string `json:"operation_name"`
-	Duration      string `json:"duration"`
-}
-
-type apiProfileEntry struct {
-	Function string `json:"function"`
-}
 
 func (h *Handler) HandleCorrelate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -461,14 +392,14 @@ func (h *Handler) HandleCorrelate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	cr, err := h.Correlation.Correlate(inport.CorrelateQuery{Fingerprint: fp, Nth: nth})
+	cr, err := h.Correlation.Correlate(r.Context(), inport.CorrelateQuery{Fingerprint: fp, Nth: nth})
 	if err != nil {
 		writeLookupError(w, err)
 		return
 	}
 	cd := cr.Error
 
-	result := apiCorrelation{
+	result := httpwire.Correlation{
 		Fingerprint: cd.Fingerprint,
 		Type:        cd.Type,
 		Value:       cd.Value,
@@ -485,7 +416,7 @@ func (h *Handler) HandleCorrelate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if occ := cr.Occurrence; occ != nil {
-		result.Occurrence = &apiOccurrence{
+		result.Occurrence = &httpwire.Occurrence{
 			Nth:       occ.Nth,
 			Timestamp: occ.Timestamp,
 			TraceID:   occ.TraceID,
@@ -493,7 +424,7 @@ func (h *Handler) HandleCorrelate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, e := range cr.Logs {
-		result.Logs = append(result.Logs, apiLogEntry{
+		result.Logs = append(result.Logs, httpwire.LogEntry{
 			Timestamp: e.Timestamp,
 			Message:   e.Message,
 			Priority:  e.Priority,
@@ -501,9 +432,9 @@ func (h *Handler) HandleCorrelate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if cr.Trace != nil {
-		trace := &apiTraceData{ServiceName: cr.Trace.ServiceName}
+		trace := &httpwire.TraceData{ServiceName: cr.Trace.ServiceName}
 		for _, s := range cr.Trace.Spans {
-			trace.Spans = append(trace.Spans, apiTraceSpan{
+			trace.Spans = append(trace.Spans, httpwire.TraceSpan{
 				OperationName: s.OperationName,
 				Duration:      s.Duration.String(),
 			})
@@ -516,7 +447,7 @@ func (h *Handler) HandleCorrelate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, e := range cr.Profile {
-		result.Profile = append(result.Profile, apiProfileEntry{Function: e.Function})
+		result.Profile = append(result.Profile, httpwire.ProfileEntry{Function: e.Function})
 	}
 
 	writeJSON(w, result)
@@ -545,52 +476,6 @@ func (h *Handler) HandleTestEmail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"status": "sent", "to": recipient})
 }
 
-// summaryToAPI converts a domain.ErrorSummary to the API response type.
-func summaryToAPI(s domain.ErrorSummary) apiError {
-	return apiError{
-		Fingerprint: s.Fingerprint,
-		Count:       s.Count,
-		Level:       s.Level,
-		Type:        s.Type,
-		Value:       s.Value,
-		LastSeen:    s.LastSeen,
-		ResolvedAt:  s.ResolvedAt,
-		State:       s.State,
-	}
-}
-
-// detailToAPI converts a domain.ErrorDetail to the API response type.
-func detailToAPI(d *domain.ErrorDetail) apiErrorDetail {
-	ad := apiErrorDetail{
-		Fingerprint: d.Fingerprint,
-		Count:       d.Count,
-		Level:       d.Level,
-		Type:        d.Type,
-		Value:       d.Value,
-		Release:     d.Release,
-		Environment: d.Environment,
-		Platform:    d.Platform,
-		FirstSeen:   d.FirstSeen,
-		LastSeen:    d.LastSeen,
-		ResolvedAt:  d.ResolvedAt,
-		State:       d.State,
-		TagDist:     d.TagDist,
-	}
-	if d.Stacktrace != "" {
-		ad.Stacktrace = json.RawMessage(d.Stacktrace)
-	}
-	if d.Breadcrumbs != "" {
-		ad.Breadcrumbs = json.RawMessage(d.Breadcrumbs)
-	}
-	if d.UserContext != "" && d.UserContext != "null" {
-		ad.User = json.RawMessage(d.UserContext)
-	}
-	if d.Tags != "" && d.Tags != "null" {
-		ad.Tags = json.RawMessage(d.Tags)
-	}
-	return ad
-}
-
 // writeError writes a structured JSON error response.
 func writeError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")
@@ -617,4 +502,20 @@ func writeLookupError(w http.ResponseWriter, err error) {
 		slog.Error("error lookup", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
 	}
+}
+
+// queryTime preserves absolute client timestamps and rejects competing clocks.
+func queryTime(r *http.Request, absolute, relative string, fallback time.Time) (time.Time, error) {
+	q := r.URL.Query()
+	if !q.Has(absolute) {
+		return fallback, nil
+	}
+	if relative != "" && q.Has(relative) {
+		return time.Time{}, fmt.Errorf("use either %s or %s", absolute, relative)
+	}
+	value, err := time.Parse(time.RFC3339Nano, q.Get(absolute))
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%s must be an RFC3339 timestamp", absolute)
+	}
+	return value, nil
 }

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -13,7 +14,7 @@ import (
 
 type correlatorFunc func(inport.CorrelateQuery) (*domain.Correlation, error)
 
-func (f correlatorFunc) Correlate(query inport.CorrelateQuery) (*domain.Correlation, error) {
+func (f correlatorFunc) Correlate(_ context.Context, query inport.CorrelateQuery) (*domain.Correlation, error) {
 	return f(query)
 }
 
@@ -34,7 +35,7 @@ func TestCorrelateCommandNeedsOnlyCorrelationPort(t *testing.T) {
 		}, nil
 	})}
 	var output bytes.Buffer
-	c.RunCorrelate([]string{"--nth", "2", "abcd"}, &output)
+	runCommand(c, "correlate", context.Background(), []string{"--nth", "2", "abcd"}, &output)
 	if calls != 1 {
 		t.Fatalf("calls = %d", calls)
 	}
@@ -54,7 +55,7 @@ func TestCorrelateCommandPreservesPartialResultsAndErrors(t *testing.T) {
 			return &domain.Correlation{Error: domain.CorrelateData{Fingerprint: "abcdef0123456789", Type: "CheckoutError"}}, nil
 		})}
 		var output bytes.Buffer
-		err := c.RunCorrelate([]string{"abcd"}, &output)
+		err := runCommand(c, "correlate", context.Background(), []string{"abcd"}, &output)
 		if failed {
 			if err == nil || !strings.Contains(err.Error(), "error unavailable") || output.Len() != 0 {
 				t.Fatalf("error = %v, output = %q", err, output.String())

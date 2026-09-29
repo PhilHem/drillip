@@ -57,7 +57,7 @@ func TestRunHealthDoesNotOpenDatabase(t *testing.T) {
 			if err != nil || stdout.String() != "ok\n" {
 				t.Fatalf("healthy result: output %q, error %v", stdout.String(), err)
 			}
-		} else if err == nil || !strings.Contains(err.Error(), "unhealthy: status 503") {
+		} else if err == nil || !strings.Contains(err.Error(), "HTTP 503") {
 			t.Fatalf("unhealthy result: %v", err)
 		}
 	}
@@ -90,7 +90,7 @@ func TestRunCommandErrors(t *testing.T) {
 			}
 		})
 	}
-	for _, args := range [][]string{{"top"}, {"top", "--help"}, {"silences"}} {
+	for _, args := range [][]string{{"top", "--help"}, {"silences", "--help"}} {
 		var stdout, stderr bytes.Buffer
 		if err := Run(context.Background(), args, &stdout, &stderr); err != nil {
 			t.Fatalf("%v: %v", args, err)

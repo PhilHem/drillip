@@ -1,9 +1,8 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
-	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"sort"
@@ -19,29 +18,9 @@ type CLI struct {
 	Correlation inport.Correlator
 }
 
-func (c *CLI) RunTop(args []string, w io.Writer) error {
-	fs := flag.NewFlagSet("top", flag.ContinueOnError)
-	limit := fs.Int("limit", 10, "number of errors to show")
-	level := fs.String("level", "", "filter by level (error, warning, info, etc.)")
-	tag := fs.String("tag", "", "filter by tag (key=value)")
-	fs.SetOutput(io.Discard)
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			fs.SetOutput(w)
-			fs.Usage()
-		}
-		return err
-	}
-
-	f := domain.ListFilter{Level: *level}
-	if *tag != "" {
-		if k, v, ok := domain.ParseTag(*tag); ok {
-			f.TagKey = k
-			f.TagVal = v
-		}
-	}
-
-	summaries, err := c.Errors.ListTop(f, *limit)
+func (c *CLI) runTop(ctx context.Context, cmd *Command, w io.Writer) error {
+	f, limit := cmd.filter, cmd.limit
+	summaries, err := c.Errors.ListTop(ctx, f, limit)
 	if err != nil {
 		return err
 	}
@@ -64,37 +43,16 @@ func (c *CLI) RunTop(args []string, w io.Writer) error {
 	return nil
 }
 
-func (c *CLI) RunRecent(args []string, w io.Writer) error {
-	fs := flag.NewFlagSet("recent", flag.ContinueOnError)
-	hours := fs.Int("hours", 1, "look back N hours")
-	level := fs.String("level", "", "filter by level (error, warning, info, etc.)")
-	tag := fs.String("tag", "", "filter by tag (key=value)")
-	fs.SetOutput(io.Discard)
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			fs.SetOutput(w)
-			fs.Usage()
-		}
-		return err
-	}
-
-	since := time.Now().UTC().Add(-time.Duration(*hours) * time.Hour)
-
-	f := domain.ListFilter{Level: *level}
-	if *tag != "" {
-		if k, v, ok := domain.ParseTag(*tag); ok {
-			f.TagKey = k
-			f.TagVal = v
-		}
-	}
-
-	summaries, err := c.Errors.ListRecent(f, since)
+func (c *CLI) runRecent(ctx context.Context, cmd *Command, w io.Writer) error {
+	hours, f := cmd.hours, cmd.filter
+	since := time.Now().UTC().Add(-time.Duration(hours) * time.Hour)
+	summaries, err := c.Errors.ListRecent(ctx, f, since)
 	if err != nil {
 		return err
 	}
 
 	if len(summaries) == 0 {
-		fmt.Fprintf(w, "no new errors in the last %d hour(s)\n", *hours)
+		fmt.Fprintf(w, "no new errors in the last %d hour(s)\n", hours)
 		return nil
 	}
 
@@ -106,22 +64,15 @@ func (c *CLI) RunRecent(args []string, w io.Writer) error {
 		})
 	}
 
-	fmt.Fprintf(w, "New errors (last %dh):\n\n", *hours)
+	fmt.Fprintf(w, "New errors (last %dh):\n\n", hours)
 	printTable(w, []string{"FINGERPRINT", "COUNT", "LEVEL", "STATE", "TYPE", "VALUE", "FIRST SEEN"}, tableRows)
 	printHint(w, "drillip show <fingerprint>")
 	return nil
 }
 
-func (c *CLI) RunShow(args []string, w io.Writer) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: drillip show <fingerprint>")
-	}
-	fp := args[0]
-	if !domain.ValidFingerprint(fp) {
-		return fmt.Errorf("invalid fingerprint: must be 1-16 hex characters")
-	}
-
-	d, err := c.Errors.GetDetail(fp)
+func (c *CLI) runShow(ctx context.Context, cmd *Command, w io.Writer) error {
+	fp := cmd.reference
+	d, err := c.Errors.GetDetail(ctx, fp)
 	if err != nil {
 		return fmt.Errorf("error %s: %w", fp, err)
 	}
@@ -220,18 +171,11 @@ func printTagDistribution(w io.Writer, dist map[string]domain.TagDist) {
 	}
 }
 
-func (c *CLI) RunTrend(args []string, w io.Writer) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: drillip trend <fingerprint>")
-	}
-	fp := args[0]
-	if !domain.ValidFingerprint(fp) {
-		return fmt.Errorf("invalid fingerprint: must be 1-16 hex characters")
-	}
-
+func (c *CLI) runTrend(ctx context.Context, cmd *Command, w io.Writer) error {
+	fp := cmd.reference
 	// Query occurrences grouped by hour for last 24h
 	since := time.Now().UTC().Add(-24 * time.Hour)
-	trend, err := c.Errors.GetTrend(fp, since)
+	trend, err := c.Errors.GetTrend(ctx, fp, since)
 	if err != nil {
 		return err
 	}
@@ -260,31 +204,9 @@ func (c *CLI) RunTrend(args []string, w io.Writer) error {
 	return nil
 }
 
-func (c *CLI) RunCorrelate(args []string, w io.Writer) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: drillip correlate <fingerprint>")
-	}
-
-	fs := flag.NewFlagSet("correlate", flag.ContinueOnError)
-	nth := fs.Int("nth", 1, "Nth most recent occurrence")
-	fs.SetOutput(io.Discard)
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			fs.SetOutput(w)
-			fs.Usage()
-		}
-		return err
-	}
-
-	fp := fs.Arg(0)
-	if fp == "" {
-		return fmt.Errorf("usage: drillip correlate <fingerprint>")
-	}
-	if !domain.ValidFingerprint(fp) {
-		return fmt.Errorf("invalid fingerprint: must be 1-16 hex characters")
-	}
-
-	cr, err := c.Correlation.Correlate(inport.CorrelateQuery{Fingerprint: fp, Nth: *nth})
+func (c *CLI) runCorrelate(ctx context.Context, cmd *Command, w io.Writer) error {
+	fp, nth := cmd.reference, cmd.nth
+	cr, err := c.Correlation.Correlate(ctx, inport.CorrelateQuery{Fingerprint: fp, Nth: nth})
 	if err != nil {
 		return fmt.Errorf("error %s: %w", fp, err)
 	}
@@ -359,16 +281,9 @@ func (c *CLI) RunCorrelate(args []string, w io.Writer) error {
 	return nil
 }
 
-func (c *CLI) RunReleases(args []string, w io.Writer) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: drillip releases <fingerprint>")
-	}
-	fp := args[0]
-	if !domain.ValidFingerprint(fp) {
-		return fmt.Errorf("invalid fingerprint: must be 1-16 hex characters")
-	}
-
-	result, err := c.Errors.GetReleases(fp)
+func (c *CLI) runReleases(ctx context.Context, cmd *Command, w io.Writer) error {
+	fp := cmd.reference
+	result, err := c.Errors.GetReleases(ctx, fp)
 	if err != nil {
 		return err
 	}
@@ -395,8 +310,9 @@ func (c *CLI) RunReleases(args []string, w io.Writer) error {
 	return nil
 }
 
-func (c *CLI) RunStats(_ []string, w io.Writer) error {
-	st, err := c.Errors.GetStats()
+func (c *CLI) runStats(ctx context.Context, cmd *Command, w io.Writer) error {
+
+	st, err := c.Errors.GetStats(ctx)
 	if err != nil {
 		return err
 	}
@@ -414,35 +330,20 @@ func (c *CLI) RunStats(_ []string, w io.Writer) error {
 	return nil
 }
 
-func (c *CLI) RunGC(args []string, w io.Writer) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: drillip gc <duration> (e.g., 7d, 30d, 24h)")
-	}
-
-	dur, err := domain.ParseDuration(args[0])
+func (c *CLI) runGC(ctx context.Context, cmd *Command, w io.Writer) error {
+	dur := cmd.duration
+	deleted, err := c.Errors.GCOccurrences(ctx, time.Now().UTC().Add(-dur))
 	if err != nil {
 		return err
 	}
-
-	deleted, err := c.Errors.GCOccurrences(time.Now().UTC().Add(-dur))
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(w, "deleted %d occurrences older than %s\n", deleted, args[0])
+	fmt.Fprintf(w, "deleted %d occurrences older than %s\n", deleted, cmd.durationText)
 	return nil
 }
 
 // RunResolve renders a resolution performed by the selected live or offline use case.
-func RunResolve(args []string, w io.Writer, resolve func(string) (domain.ResolveResult, error)) error {
-	if len(args) != 1 {
-		return fmt.Errorf("usage: drillip resolve <fingerprint>")
-	}
-	fpPrefix := args[0]
-	if !domain.ValidFingerprint(fpPrefix) {
-		return fmt.Errorf("invalid fingerprint: must be 1-16 hex characters")
-	}
-
-	result, err := resolve(fpPrefix)
+func (c *CLI) runResolve(ctx context.Context, cmd *Command, w io.Writer) error {
+	fpPrefix := cmd.reference
+	result, err := c.Errors.Resolve(ctx, fpPrefix)
 	if err != nil {
 		return err
 	}
@@ -453,43 +354,18 @@ func RunResolve(args []string, w io.Writer, resolve func(string) (domain.Resolve
 	return nil
 }
 
-func (c *CLI) RunSilence(args []string, w io.Writer) error {
-	fs := flag.NewFlagSet("silence", flag.ContinueOnError)
-	reason := fs.String("reason", "", "reason for silencing")
-	fs.SetOutput(io.Discard)
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			fs.SetOutput(w)
-			fs.Usage()
-		}
-		return err
-	}
-
-	remaining := fs.Args()
-	if len(remaining) == 0 {
-		return fmt.Errorf("usage: drillip silence <fingerprint> [duration] [--reason \"...\"]")
-	}
-
-	fp := remaining[0]
-	if !domain.ValidFingerprint(fp) {
-		return fmt.Errorf("invalid fingerprint: must be 1-16 hex characters")
-	}
-
-	var expiresAt *time.Time
-	if len(remaining) > 1 {
-		dur, err := domain.ParseDuration(remaining[1])
-		if err != nil {
-			return fmt.Errorf("invalid duration: %w", err)
-		}
-		t := time.Now().UTC().Add(dur)
+func (c *CLI) runSilence(ctx context.Context, cmd *Command, w io.Writer) error {
+	fp, expiresAt := cmd.reference, (*time.Time)(nil)
+	if cmd.durationText != "" {
+		t := time.Now().UTC().Add(cmd.duration)
 		expiresAt = &t
 	}
-
-	fp, err := c.Errors.Silence(fp, expiresAt, *reason)
+	result, err := c.Errors.Silence(ctx, fp, expiresAt, cmd.reason)
 	if err != nil {
 		return err
 	}
 
+	fp, expiresAt = result.Fingerprint, result.ExpiresAt
 	if expiresAt != nil {
 		fmt.Fprintf(w, "silenced %s until %s\n", fp, expiresAt.Format(time.RFC3339))
 	} else {
@@ -498,8 +374,9 @@ func (c *CLI) RunSilence(args []string, w io.Writer) error {
 	return nil
 }
 
-func (c *CLI) RunSilences(_ []string, w io.Writer) error {
-	entries, err := c.Errors.ListSilences()
+func (c *CLI) runSilences(ctx context.Context, cmd *Command, w io.Writer) error {
+
+	entries, err := c.Errors.ListSilences(ctx)
 	if err != nil {
 		return err
 	}
@@ -522,15 +399,9 @@ func (c *CLI) RunSilences(_ []string, w io.Writer) error {
 	return nil
 }
 
-func (c *CLI) RunUnsilence(args []string, w io.Writer) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: drillip unsilence <fingerprint>")
-	}
-	fp := args[0]
-	if !domain.ValidFingerprint(fp) {
-		return fmt.Errorf("invalid fingerprint: must be 1-16 hex characters")
-	}
-	fp, err := c.Errors.Unsilence(fp)
+func (c *CLI) runUnsilence(ctx context.Context, cmd *Command, w io.Writer) error {
+	fp := cmd.reference
+	fp, err := c.Errors.Unsilence(ctx, fp)
 	if err != nil {
 		return err
 	}

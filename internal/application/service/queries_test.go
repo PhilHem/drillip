@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -40,18 +41,18 @@ func (r *queryRepository) GetReleases(fp string) ([]domain.ReleaseStats, error) 
 func TestInvestigationOperationsOwnReferenceResolution(t *testing.T) {
 	operations := map[string]func(*Errors, string) (string, error){
 		"detail": func(s *Errors, ref string) (string, error) {
-			result, err := s.GetDetail(ref)
+			result, err := s.GetDetail(context.Background(), ref)
 			if err != nil {
 				return "", err
 			}
 			return result.Fingerprint, nil
 		},
 		"trend": func(s *Errors, ref string) (string, error) {
-			result, err := s.GetTrend(ref, time.Now())
+			result, err := s.GetTrend(context.Background(), ref, time.Now())
 			return result.Fingerprint, err
 		},
 		"releases": func(s *Errors, ref string) (string, error) {
-			result, err := s.GetReleases(ref)
+			result, err := s.GetReleases(context.Background(), ref)
 			return result.Fingerprint, err
 		},
 	}

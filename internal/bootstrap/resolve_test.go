@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/PhilHem/drillip/internal/adapter/in/api"
+	"github.com/PhilHem/drillip/internal/adapter/out/httpclient"
 	store "github.com/PhilHem/drillip/internal/adapter/out/sqlite"
 	"github.com/PhilHem/drillip/internal/application/service"
 	"github.com/PhilHem/drillip/internal/domain"
@@ -38,7 +39,7 @@ func TestResolveCLIUsesServerPolicyAndNeverOpensLocalDatabase(t *testing.T) {
 	notifier := &resolutionRecorder{received: make(chan []domain.ResolvedError, 2)}
 	app := service.New(s, notifier, nil)
 	h := &api.Handler{Errors: app}
-	srv := httptest.NewServer(http.HandlerFunc(h.HandleResolve))
+	srv := httptest.NewServer(h.Routes())
 	defer srv.Close()
 	t.Setenv("DRILLIP_ADDR", strings.TrimPrefix(srv.URL, "http://"))
 	t.Setenv("DRILLIP_DB", filepath.Join(t.TempDir(), "missing", "client.db"))
@@ -89,6 +90,10 @@ func TestResolveOfflineIsExplicitAndNoFallbackOccurs(t *testing.T) {
 	}
 	var serverCalls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/0/capabilities/" {
+			fmt.Fprint(w, `{"command_api":1}`)
+			return
+		}
 		serverCalls.Add(1)
 		w.WriteHeader(http.StatusServiceUnavailable)
 		json.NewEncoder(w).Encode(map[string]string{"error": "temporarily unavailable"})
@@ -104,7 +109,7 @@ func TestResolveOfflineIsExplicitAndNoFallbackOccurs(t *testing.T) {
 	if err != nil || detail.ResolvedAt != "" {
 		t.Fatal("failed HTTP request mutated local database")
 	}
-	if err := Run(context.Background(), []string{"--offline", "resolve", event.Fingerprint}, &stdout, &stderr); err != nil {
+	if err := Run(context.Background(), []string{"maintenance", "--db", db, "resolve", event.Fingerprint}, &stdout, &stderr); err != nil {
 		t.Fatal(err)
 	}
 	detail, _ = s.GetDetail(event.Fingerprint)
@@ -121,7 +126,8 @@ func TestResolveOfflineIsExplicitAndNoFallbackOccurs(t *testing.T) {
 func TestResolveRequestHonorsCancellationAndReportsErrors(t *testing.T) {
 	for _, status := range []int{404, 409, 500} {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(status) }))
-		_, err := resolveOnServer(context.Background(), strings.TrimPrefix(srv.URL, "http://"), "abcd")
+		client, _ := httpclient.New(srv.URL)
+		_, err := client.Resolve(context.Background(), "abcd")
 		srv.Close()
 		if err == nil {
 			t.Fatalf("ignored HTTP %d", status)
@@ -131,7 +137,8 @@ func TestResolveRequestHonorsCancellationAndReportsErrors(t *testing.T) {
 	defer srv.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	_, err := resolveOnServer(ctx, strings.TrimPrefix(srv.URL, "http://"), "abcd")
+	client, _ := httpclient.New(srv.URL)
+	_, err := client.Resolve(ctx, "abcd")
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("deadline: %v", err)
 	}

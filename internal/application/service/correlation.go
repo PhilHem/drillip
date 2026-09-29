@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"time"
 
 	inport "github.com/PhilHem/drillip/internal/application/port/in"
@@ -9,7 +10,11 @@ import (
 
 // Correlate resolves the fingerprint, loads the error and selected occurrence,
 // and collects available telemetry. Optional sources may fail independently.
-func (s *Errors) Correlate(query inport.CorrelateQuery) (*domain.Correlation, error) {
+func (s *Errors) Correlate(ctx context.Context, query inport.CorrelateQuery) (*domain.Correlation, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	fp, err := s.store.FindByPrefix(query.Fingerprint)
 	if err != nil {
 		return nil, err

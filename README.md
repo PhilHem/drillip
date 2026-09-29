@@ -10,6 +10,16 @@ events, groups them in SQLite, and sends email notifications for new errors
 and regressions. Investigate errors through its CLI and HTTP API, with
 optional log, metric, trace, and profile correlation.
 
+One reason Drillip exists is to make Sentry SDK error reporting useful without
+another user-management system to operate. For services already managed through
+trusted host/container access or SSH, Drillip reuses that access boundary, with
+no separate accounts, teams, or roles to maintain. See
+[why Drillip keeps access management outside the tracker](docs/explanation/operating-model.md#why-drillip-keeps-access-management-outside-the-tracker).
+
+Documentation in this checkout describes the source version. Runnable release
+examples explicitly pin v0.3.14, whose CLI differs. For the current server-based
+CLI, follow [switch existing CLI commands to server access](docs/how-to/upgrade-cli.md).
+
 ## Quick start
 
 Follow [Capture and resolve your first error](docs/tutorials/first-error.md)
@@ -23,9 +33,9 @@ For an existing application, [run Drillip](docs/how-to/run-drillip.md) and
 | Need | Documentation |
 |---|---|
 | Learn with a tutorial | [Capture and resolve your first error](docs/tutorials/first-error.md), [run Python and Drillip in one container](docs/tutorials/python-container.md) |
-| Complete a task | [Run Drillip](docs/how-to/run-drillip.md), [embed in an application container](docs/how-to/embed-drillip.md), [send errors](docs/how-to/send-errors.md), [set up email](docs/how-to/email-notifications.md) |
+| Complete a task | [Run Drillip](docs/how-to/run-drillip.md), [switch CLI access](docs/how-to/upgrade-cli.md), [embed in an application container](docs/how-to/embed-drillip.md), [send errors](docs/how-to/send-errors.md), [set up email](docs/how-to/email-notifications.md) |
 | Look up a setting or interface | [Configuration](docs/reference/configuration.md), [HTTP API](docs/reference/http-api.md), [CLI](docs/reference/cli.md) |
-| Understand the concepts | [How Drillip works](docs/explanation/overview.md), [error grouping and lifecycle](docs/explanation/error-lifecycle.md) |
+| Understand the concepts | [Operating model and trust boundary](docs/explanation/operating-model.md), [how Drillip works](docs/explanation/overview.md), [error grouping and lifecycle](docs/explanation/error-lifecycle.md) |
 
 ## Contributing
 

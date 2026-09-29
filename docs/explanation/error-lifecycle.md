@@ -101,7 +101,7 @@ delivery; they do not prevent events from being stored or change their state.
 Resolution can also trigger a summary email. The hourly automatic-resolution
 task includes only errors with a previously successful notification. Manual
 resolution through HTTP or the normal CLI command includes the matched unresolved
-error. Explicit offline resolution does not send email. Resolution summaries bypass the new-error
+error. Explicit `maintenance --db PATH resolve` does not send email. Resolution summaries bypass the new-error
 silence, cooldown, and digest controls. See the
 [notification reference](../reference/configuration.md#email-notifications)
 for the delivery rules.

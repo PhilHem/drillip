@@ -137,3 +137,10 @@ type Releases struct {
 	Fingerprint string
 	Releases    []ReleaseStats
 }
+
+// SilenceResult reports the canonical error and the expiry actually stored.
+// SQLite timestamps have whole-second precision; nil means permanent.
+type SilenceResult struct {
+	Fingerprint string
+	ExpiresAt   *time.Time
+}
