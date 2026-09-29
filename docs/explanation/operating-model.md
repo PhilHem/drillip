@@ -21,22 +21,42 @@ replicas one history but introduces a separate service to operate. Both patterns
 use one writer server per database; do not mount one SQLite file into several
 Drillip servers. [Embedding](../how-to/embed-drillip.md) describes the first pattern.
 
-## Keep the HTTP endpoint inside the intended trust boundary
+## Reuse the deployment's access boundary
 
-Drillip does not authenticate requests or authorize operations. Anyone who can
-reach its HTTP endpoint can read error details and available telemetry, submit
-events, resolve or silence errors, delete occurrences, and trigger test email.
+Drillip deliberately relies on the deployment's existing access controls instead
+of maintaining another set of users, tokens, and roles. Applications and operators
+already share a trusted host, container, or restricted network. Operators use
+existing administrative access or authenticated SSH forwarding to reach the
+tracker. This keeps deployment and operation small: there is no separate Drillip
+authentication system to configure or maintain.
+
+The supplied examples make that boundary concrete:
+
+- The embedded tracker listens on container loopback. The application sends
+  events locally; operators use `docker compose exec app drillip top` through
+  their existing container-administration access.
+- The systemd service listens on host loopback. Operators can work on that host
+  or use [SSH port forwarding](../how-to/upgrade-cli.md#2-select-and-check-the-server)
+  to run the CLI remotely through their existing SSH access.
+- The separate Docker example publishes the tracker port on host loopback.
+  Inside that container Drillip listens on all interfaces, so its container
+  network also belongs to the chosen trust boundary.
+
+Loopback is shared by local processes in the same host or container network
+namespace; it does not distinguish administrators from other local users.
+Every caller that can reach the endpoint has the same full API access, including
+SDK senders: ingest, read, resolve, silence, delete occurrences, and test email.
+Choose the host/container/network boundary for that shared level of trust.
+
+The built-in endpoint uses HTTP. SSH forwarding provides the protected remote
+path in this model. Deployments using HTTPS terminate TLS externally and retain
+their chosen host, container, or network access boundary; transport encryption
+alone does not grant or restrict API privileges.
+
 Reports can contain user context, request data, tags, and breadcrumbs. Configure
 your application's SDK to remove secrets and unwanted personal data before sending.
 Drillip's ingest sanitization truncates and normalizes fields; it is not sensitive-
 data redaction.
-
-The example host ports bind to loopback; the embedded tracker stays on container
-loopback. Keep access limited to trusted applications and operators. Remote access
-requires an access boundary outside Drillip, such as an SSH tunnel or an
-appropriately restricted network/proxy. The built-in server listens over plain HTTP; HTTPS requires external TLS
-termination. TLS protects transport; it does not by itself authorize callers. A proxy that only adds TLS is not access control.
-Drillip is not a public multi-tenant Sentry replacement.
 
 ## Normal commands ask the server
 

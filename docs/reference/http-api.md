@@ -4,8 +4,10 @@ This describes the current checkout. Command API compatibility and absolute-time
 parameters require the matching server build; the pinned v0.3.14 examples use the
 older relative-parameter API.
 
-Requests are unauthenticated. Keep this endpoint inside the intended
-[trust boundary](../explanation/operating-model.md#keep-the-http-endpoint-inside-the-intended-trust-boundary).
+The API deliberately has no separate credentials or roles. Access control belongs
+to the [deployment boundary](../explanation/operating-model.md#reuse-the-deployments-access-boundary),
+such as existing host/container administration or SSH forwarding. All callers
+that can reach the endpoint have the same full API access.
 
 API responses use JSON, except for a successful health check, which returns
 plain text `ok`. Handler errors use `{"error":"message"}` with an HTTP

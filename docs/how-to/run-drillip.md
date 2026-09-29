@@ -4,8 +4,9 @@ Choose Docker, the Go binary, or systemd to run a Drillip server. For a guided
 first run with disposable data, use the
 [first-error tutorial](../tutorials/first-error.md).
 
-Drillip has no HTTP authentication or project isolation. Keep access limited to
-trusted senders and operators; see [the operating model](../explanation/operating-model.md).
+Drillip reuses your host, container, or network access controls, so you do not need
+to configure separate Drillip accounts or tokens. Keep the endpoint within that
+shared boundary; see [the operating model](../explanation/operating-model.md).
 
 The Docker and `@latest` commands below install a released version. To use the
 current checkout's CLI changes, follow [the source upgrade procedure](upgrade-cli.md).

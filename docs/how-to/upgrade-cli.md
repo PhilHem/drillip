@@ -66,8 +66,9 @@ the intended server with the newly built binary. Do not switch to another databa
 to work around a version mismatch. An explicit URL overrides legacy address
 settings and avoids relying on another shell's environment.
 
-For a tracker on another host, retain the [trust boundary](../explanation/operating-model.md#keep-the-http-endpoint-inside-the-intended-trust-boundary).
-For example, keep the server on remote loopback and establish an SSH tunnel in a
+For a tracker on another host, reuse your existing SSH access as the
+[deployment boundary](../explanation/operating-model.md#reuse-the-deployments-access-boundary).
+Keep the server on remote loopback and establish an SSH tunnel in a
 separate terminal: `ssh -N -L 18301:127.0.0.1:8301 user@tracker-host`. Then use
 `DRILLIP_SERVER=http://127.0.0.1:18301` locally. No public Drillip port is required.
 
