@@ -77,7 +77,7 @@ func TestRunCommandErrors(t *testing.T) {
 	t.Setenv("DRILLIP_DB", filepath.Join(t.TempDir(), "errors.db"))
 	for _, args := range [][]string{
 		{"show"}, {"show", "nonsense"}, {"show", "0000000000000000"},
-		{"gc", "invalid"}, {"resolve"}, {"resolve", "0000000000000000"},
+		{"gc", "invalid"}, {"resolve"}, {"--offline", "resolve", "0000000000000000"},
 		{"silence"}, {"unsilence"}, {"top", "--unknown"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {

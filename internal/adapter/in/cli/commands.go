@@ -446,8 +446,9 @@ func (c *CLI) RunGC(args []string, w io.Writer) error {
 	return nil
 }
 
-func (c *CLI) RunResolve(args []string, w io.Writer) error {
-	if len(args) == 0 {
+// RunResolve renders a resolution performed by the selected live or offline use case.
+func RunResolve(args []string, w io.Writer, resolve func(string) (domain.ResolveResult, error)) error {
+	if len(args) != 1 {
 		return fmt.Errorf("usage: drillip resolve <fingerprint>")
 	}
 	fpPrefix := args[0]
@@ -455,14 +456,14 @@ func (c *CLI) RunResolve(args []string, w io.Writer) error {
 		return fmt.Errorf("invalid fingerprint: must be 1-16 hex characters")
 	}
 
-	result, err := c.Errors.Resolve(fpPrefix)
+	result, err := resolve(fpPrefix)
 	if err != nil {
 		return err
 	}
 	if result.Matched == 0 {
 		return fmt.Errorf("no unresolved error matching %s", fpPrefix)
 	}
-	fmt.Fprintf(w, "resolved %d error(s) matching %s\n", result.Matched, fpPrefix)
+	fmt.Fprintf(w, "resolved %s\n", result.Fingerprint)
 	return nil
 }
 
