@@ -55,6 +55,16 @@ Notifications are sent for:
 - **New errors** — first time a fingerprint is seen
 - **Regressions** — a resolved error reappears (amber-styled email with "was resolved for X" context)
 - **Digests** — multiple new errors within the digest window are batched into one summary
+- **Automatic resolutions** — the hourly maintenance task sends a summary of
+  newly resolved errors that were previously marked as notified after successful
+  SMTP delivery. Other stale errors are still resolved, but omitted from the email.
+- **Manual HTTP resolutions** — resolving errors through the HTTP API sends a
+  summary of the matching unresolved errors, even if they were not previously
+  notified. The `drillip resolve` CLI command does not send email.
+
+Resolution summaries are sent directly, outside the new-error digest and
+cooldown. Silencing a fingerprint suppresses new-error and regression emails;
+it does not suppress a resolution summary.
 
 Notification emails have at most three send attempts, with waits of 2 and
 4 seconds before the retries. Test emails use one attempt and bypass digest
