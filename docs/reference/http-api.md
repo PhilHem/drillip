@@ -1,5 +1,12 @@
 # HTTP API reference
 
+This describes the current checkout. Command API compatibility and absolute-time
+parameters require the matching server build; the pinned v0.3.14 examples use the
+older relative-parameter API.
+
+Requests are unauthenticated. Keep this endpoint inside the intended
+[trust boundary](../explanation/operating-model.md#keep-the-http-endpoint-inside-the-intended-trust-boundary).
+
 API responses use JSON, except for a successful health check, which returns
 plain text `ok`. Handler errors use `{"error":"message"}` with an HTTP
 error status. Paths below are relative to the running Drillip instance.
