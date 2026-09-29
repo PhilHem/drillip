@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,18 +28,19 @@ type Config struct {
 var httpClient = &http.Client{Timeout: 5 * time.Second}
 
 // execCommand is a variable for test mockability.
-var execCommand = exec.Command
+var execCommand = exec.CommandContext
 
 // --- Journalctl ---
 
-func QueryJournalctl(unit string, ts time.Time) ([]domain.JournalEntry, error) {
+func QueryJournalctl(ctx context.Context, unit string, ts time.Time) ([]domain.JournalEntry, error) {
 	if unit == "" {
 		return nil, nil
 	}
-	since := ts.Add(-5 * time.Second).Format("2006-01-02 15:04:05")
-	until := ts.Add(5 * time.Second).Format("2006-01-02 15:04:05")
+	since := "@" + strconv.FormatInt(ts.Add(-5*time.Second).Unix(), 10)
+	until := "@" + strconv.FormatInt(ts.Add(5*time.Second).Unix(), 10)
 
-	cmd := execCommand("journalctl", "-u", unit, "--since", since, "--until", until, "-o", "json", "--no-pager")
+	cmd := execCommand(ctx, "journalctl", "-u", unit, "--since", since, "--until", until, "-o", "json", "--no-pager")
+	cmd.WaitDelay = 100 * time.Millisecond
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("journalctl: %w", err)
@@ -59,13 +61,13 @@ func QueryJournalctl(unit string, ts time.Time) ([]domain.JournalEntry, error) {
 
 // --- VictoriaTraces ---
 
-func QueryVictoriaTraces(baseURL, traceID string) (*domain.TraceData, error) {
+func QueryVictoriaTraces(ctx context.Context, baseURL, traceID string) (*domain.TraceData, error) {
 	if baseURL == "" || traceID == "" {
 		return nil, nil
 	}
 
 	url := strings.TrimRight(baseURL, "/") + "/api/traces/" + traceID
-	resp, err := httpClient.Get(url)
+	resp, err := get(ctx, url)
 	if err != nil {
 		return nil, fmt.Errorf("victoria traces: %w", err)
 	}
@@ -75,7 +77,7 @@ func QueryVictoriaTraces(baseURL, traceID string) (*domain.TraceData, error) {
 		return nil, fmt.Errorf("victoria traces: status %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	if err != nil {
 		return nil, fmt.Errorf("victoria traces: read body: %w", err)
 	}
@@ -126,7 +128,7 @@ func QueryVictoriaTraces(baseURL, traceID string) (*domain.TraceData, error) {
 
 // --- VictoriaMetrics ---
 
-func QueryVictoriaMetrics(baseURL string, ts time.Time) (*domain.MetricsSnapshot, error) {
+func QueryVictoriaMetrics(ctx context.Context, baseURL string, ts time.Time) (*domain.MetricsSnapshot, error) {
 	if baseURL == "" {
 		return nil, nil
 	}
@@ -134,7 +136,7 @@ func QueryVictoriaMetrics(baseURL string, ts time.Time) (*domain.MetricsSnapshot
 	queries := map[string]string{
 		"error_rate":  `rate(http_requests_total{status=~"5.."}[5m])`,
 		"p99_latency": `histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))`,
-		"cpu_usage":   `process_cpu_seconds_total`,
+		"cpu_seconds": `process_cpu_seconds_total`,
 		"memory_mb":   `process_resident_memory_bytes / 1024 / 1024`,
 	}
 
@@ -142,17 +144,25 @@ func QueryVictoriaMetrics(baseURL string, ts time.Time) (*domain.MetricsSnapshot
 	baseAPI := strings.TrimRight(baseURL, "/") + "/api/v1/query"
 
 	for name, query := range queries {
+		if ctx.Err() != nil {
+			snap.Values[name] = "(timeout)"
+			continue
+		}
 		params := url.Values{
 			"query": {query},
 			"time":  {strconv.FormatInt(ts.Unix(), 10)},
 		}
-		resp, err := httpClient.Get(baseAPI + "?" + params.Encode())
+		resp, err := get(ctx, baseAPI+"?"+params.Encode())
 		if err != nil {
 			snap.Values[name] = "(error)"
 			continue
 		}
-		body, _ := io.ReadAll(resp.Body)
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 		resp.Body.Close()
+		if readErr != nil || resp.StatusCode != http.StatusOK {
+			snap.Values[name] = "(error)"
+			continue
+		}
 
 		var result struct {
 			Data struct {
@@ -161,7 +171,15 @@ func QueryVictoriaMetrics(baseURL string, ts time.Time) (*domain.MetricsSnapshot
 				} `json:"result"`
 			} `json:"data"`
 		}
-		if json.Unmarshal(body, &result) == nil && len(result.Data.Result) > 0 && len(result.Data.Result[0].Value) > 1 {
+		if json.Unmarshal(body, &result) != nil {
+			snap.Values[name] = "(error)"
+			continue
+		}
+		if len(result.Data.Result) > 1 {
+			snap.Values[name] = "(ambiguous: multiple series)"
+			continue
+		}
+		if len(result.Data.Result) == 1 && len(result.Data.Result[0].Value) > 1 {
 			var val string
 			if json.Unmarshal(result.Data.Result[0].Value[1], &val) == nil {
 				snap.Values[name] = val
@@ -173,7 +191,7 @@ func QueryVictoriaMetrics(baseURL string, ts time.Time) (*domain.MetricsSnapshot
 
 // --- Pyroscope ---
 
-func QueryPyroscope(baseURL, service string, ts time.Time) ([]domain.ProfileEntry, error) {
+func QueryPyroscope(ctx context.Context, baseURL, service string, ts time.Time) ([]domain.ProfileEntry, error) {
 	if baseURL == "" || service == "" {
 		return nil, nil
 	}
@@ -183,7 +201,7 @@ func QueryPyroscope(baseURL, service string, ts time.Time) ([]domain.ProfileEntr
 	url := fmt.Sprintf("%s/render?query=%s.cpu&from=%d&until=%d&format=json",
 		strings.TrimRight(baseURL, "/"), service, from, until)
 
-	resp, err := httpClient.Get(url)
+	resp, err := get(ctx, url)
 	if err != nil {
 		return nil, fmt.Errorf("pyroscope: %w", err)
 	}
@@ -193,7 +211,7 @@ func QueryPyroscope(baseURL, service string, ts time.Time) ([]domain.ProfileEntr
 		return nil, fmt.Errorf("pyroscope: status %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	if err != nil {
 		return nil, fmt.Errorf("pyroscope: read body: %w", err)
 	}
@@ -216,4 +234,12 @@ func QueryPyroscope(baseURL, service string, ts time.Time) ([]domain.ProfileEntr
 		}
 	}
 	return entries, nil
+}
+
+func get(ctx context.Context, target string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return nil, err
+	}
+	return httpClient.Do(req)
 }

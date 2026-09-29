@@ -1,6 +1,8 @@
 package sqlite
 
 import (
+	"database/sql"
+	"errors"
 	"strings"
 	"time"
 
@@ -180,6 +182,9 @@ func (s *Store) GetNthOccurrence(fp string, nth int) (*domain.Occurrence, error)
 		FROM occurrences WHERE fingerprint = ?
 		ORDER BY timestamp DESC LIMIT 1 OFFSET ?
 	`, fp, nth-1).Scan(&o.Timestamp, &o.TraceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, domain.ErrOccurrenceNotFound
+	}
 	if err != nil {
 		return nil, err
 	}

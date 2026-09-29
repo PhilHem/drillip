@@ -113,3 +113,16 @@ correlation endpoint. Each integration is optional. Journal correlation needs
 `journalctl` and access to the selected unit's logs. Trace correlation also
 needs a trace ID on the occurrence. Profile correlation needs both
 `DRILLIP_PYROSCOPE_URL` and `DRILLIP_SERVICE`.
+
+Correlation enrichment has a shared five-second budget. Slow or unavailable
+optional integrations leave stored error/occurrence context available; caller
+cancellation stops integration HTTP requests and journal subprocesses. Journal
+queries use absolute epoch timestamps, independent of the server timezone.
+
+Metric queries must yield one series to produce a numeric value. Multiple series
+are reported as `(ambiguous: multiple series)` instead of selecting an arbitrary
+series; failures or exhausted budgets use `(error)` or `(timeout)`. The queries
+have no per-service selector, so use a data source appropriate to this tracker's
+scope. `cpu_seconds` is cumulative process CPU seconds, previously misleadingly
+named `cpu_usage`; the query itself is unchanged. This is not a CPU utilization
+percentage. Query-formula and selector design remain outside this change.
