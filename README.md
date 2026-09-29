@@ -17,9 +17,9 @@ trusted host/container access or SSH, Drillip reuses that access boundary, with
 no separate accounts, teams, or roles to maintain. See
 [why Drillip keeps access management outside the tracker](docs/explanation/operating-model.md#why-drillip-keeps-access-management-outside-the-tracker).
 
-Documentation in this checkout describes the source version. Runnable release
-examples explicitly pin v0.3.14, whose CLI differs. For the current server-based
-CLI, follow [switch existing CLI commands to server access](docs/how-to/upgrade-cli.md).
+The server-based CLI is available from v0.3.15. Container examples still explicitly
+pin v0.3.14, whose CLI differs. To upgrade an existing deployment, follow
+[switch existing CLI commands to server access](docs/how-to/upgrade-cli.md).
 
 ## Quick start
 

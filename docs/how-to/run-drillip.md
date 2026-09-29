@@ -8,8 +8,9 @@ Drillip reuses your host, container, or network access controls, so you do not n
 to configure separate Drillip accounts or tokens. Keep the endpoint within that
 shared boundary; see [the operating model](../explanation/operating-model.md).
 
-The Docker and `@latest` commands below install a released version. To use the
-current checkout's CLI changes, follow [the source upgrade procedure](upgrade-cli.md).
+The Docker example below pins v0.3.14; `@latest` installs the latest tagged version.
+The server-based CLI is available from v0.3.15. For an existing deployment, follow
+[the CLI upgrade procedure](upgrade-cli.md) to update the server and client together.
 
 ## Docker
 

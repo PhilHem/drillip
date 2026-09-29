@@ -2,9 +2,10 @@
 
 Use this guide to move an existing deployment's operator commands to the current
 checkout's server-based CLI. It covers direct binaries and the supplied systemd
-unit. It requires a checkout containing command API version 1, the Go version in
+unit. Command API version 1 is available from v0.3.15. This procedure requires a
+checkout of that release or later, the Go version in
 [go.mod](../../go.mod), `curl`, `jq`, and access to the host running the server.
-The pinned v0.3.14 image and `go install ...@latest` do not establish this contract.
+The pinned v0.3.14 image does not support this command API.
 
 Keep the current database location and deployment configuration. This change does
 not move data or require a new database. Build both server and client from the
