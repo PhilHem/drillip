@@ -20,7 +20,7 @@ Server address settings are listed in the
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/1/store/` | Ingest a Sentry event (plain JSON) |
+| `POST` | `/api/1/store/` | Ingest a Sentry [event](glossary.md#event) (plain JSON) |
 | `POST` | `/api/1/envelope/` | Ingest a Sentry envelope |
 
 Both ingestion paths accept plain JSON or an event envelope and support
@@ -28,6 +28,9 @@ Both ingestion paths accept plain JSON or an event envelope and support
 decompressed input is read up to 10 MiB. A stored event returns
 `{"id":"<fingerprint>"}`. Events without an exception or message are ignored
 and return `{"id":"ok"}`.
+
+The stored response's `id` is the error group's [fingerprint](glossary.md#fingerprint),
+not the [SDK event ID](glossary.md#sdk-event-id).
 
 Events are sanitized at ingest: oversized fields are truncated, invalid levels normalized, CRLF stripped from exception types.
 
@@ -104,7 +107,7 @@ servers before mutating state. Health probes remain independently usable.
 ## Fingerprints
 
 Fingerprint arguments accept 1–16 lowercase hexadecimal characters (`a-f`,
-`0-9`). All error operations accept a full fingerprint or a unique prefix.
+`0-9`). All error operations accept a full fingerprint or a unique [prefix](glossary.md#prefix).
 Unknown references return HTTP `404`; ambiguous prefixes return HTTP `409` without
 changing any error. Use a longer fingerprint to select exactly one error.
 `resolve` updates only that error and returns its full fingerprint; an already

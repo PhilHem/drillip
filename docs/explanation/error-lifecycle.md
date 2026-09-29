@@ -7,9 +7,11 @@ open, and how much occurrence history remains available.
 
 ## Events, occurrences, and errors
 
-An **event** is a report sent by an application through the Sentry protocol.
-When Drillip stores an event, it records an **occurrence** and creates or
-updates the grouped **error** identified by its fingerprint.
+An **[event](../reference/glossary.md#event)** is a report sent by an application
+through the Sentry protocol. When Drillip stores an event, it records an
+**[occurrence](../reference/glossary.md#occurrence)** and creates or updates the
+grouped **[error](../reference/glossary.md#error-error-group)** identified by its
+[fingerprint](../reference/glossary.md#fingerprint).
 
 The error holds its first-seen time, last-seen time, total count, and details
 such as the exception and stacktrace. Each occurrence records a receipt time,
@@ -17,7 +19,7 @@ release, trace ID, and tags. Two stored events with the same fingerprint
 produce one error with a count of two and two occurrence records.
 
 Times reflect when Drillip receives the events. Repeated submissions count
-again, even if they carry the same Sentry event ID.
+again, even if they carry the same [SDK event ID](../reference/glossary.md#sdk-event-id).
 
 ## A fingerprint defines the group
 
@@ -77,7 +79,8 @@ the application that reported it nor deletes the error's history.
 
 When another event with the same fingerprint arrives after resolution,
 Drillip clears the resolution, increases the existing count, and treats the
-occurrence as a **regression**. The original `first_seen` is preserved.
+occurrence as a **[regression](../reference/glossary.md#regression)**. The original
+`first_seen` is preserved.
 Regression describes this transition; it is not a fourth displayed state.
 The error returns to `new` or `ongoing` according to its original age.
 
