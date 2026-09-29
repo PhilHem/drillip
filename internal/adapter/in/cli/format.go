@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/PhilHem/drillip/internal/domain"
 )
@@ -18,12 +19,12 @@ func printTable(w io.Writer, headers []string, rows [][]string) {
 	// Calculate column widths
 	widths := make([]int, len(headers))
 	for i, h := range headers {
-		widths[i] = len(h)
+		widths[i] = utf8.RuneCountInString(h)
 	}
 	for _, row := range rows {
 		for i, cell := range row {
-			if i < len(widths) && len(cell) > widths[i] {
-				widths[i] = len(cell)
+			if i < len(widths) && utf8.RuneCountInString(cell) > widths[i] {
+				widths[i] = utf8.RuneCountInString(cell)
 			}
 		}
 	}
@@ -61,8 +62,8 @@ func printTable(w io.Writer, headers []string, rows [][]string) {
 }
 
 func printSection(w io.Writer, name string) {
-	line := strings.Repeat("─", 40)
-	fmt.Fprintf(w, "── %s %s\n", name, line[:max(1, 40-len(name)-1)])
+	line := strings.Repeat("─", max(1, 40-utf8.RuneCountInString(name)-1))
+	fmt.Fprintf(w, "── %s %s\n", name, line)
 }
 
 func printHint(w io.Writer, hints ...string) {
@@ -144,13 +145,17 @@ func printBar(w io.Writer, label string, value, maxValue, width int) {
 }
 
 func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	if maxLen <= 0 {
+		return ""
+	}
+	chars := []rune(s)
+	if len(chars) <= maxLen {
 		return s
 	}
 	if maxLen <= 3 {
-		return s[:maxLen]
+		return string(chars[:maxLen])
 	}
-	return s[:maxLen-3] + "..."
+	return string(chars[:maxLen-3]) + "..."
 }
 
 func timeAgo(t time.Time) string {
