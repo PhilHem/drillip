@@ -196,14 +196,7 @@ Use drillip COMMAND --help for command options.
 		if err != nil {
 			return err
 		}
-		if mode == "health" {
-			if err := client.Health(ctx); err != nil {
-				return fmt.Errorf("unhealthy: %w", err)
-			}
-			_, err = fmt.Fprintln(stdout, "ok")
-			return err
-		}
-		return cmd.Run(ctx, &cli.CLI{Errors: client, Correlation: client, Backups: client,
+		return cmd.Run(ctx, &cli.CLI{Errors: client, Correlation: client, Backups: client, Health: client,
 			CommandPrefix: []string{"drillip", "--server", target}}, stdout)
 	}
 }
