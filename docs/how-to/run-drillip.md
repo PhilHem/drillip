@@ -53,3 +53,6 @@ binary and unit, enable startup at boot, and check the running service.
 
 Check the running server at `/-/healthy` on its configured address. A healthy
 server returns `ok`. Then [connect your application](send-errors.md).
+
+For a persistent Docker installation, [back up the database volume and verify a
+restore](backup-restore.md) before relying on the stored history.
