@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"time"
 
 	"github.com/PhilHem/drillip/internal/domain"
@@ -17,6 +18,17 @@ const metadataSchema = `CREATE TABLE IF NOT EXISTS drillip_metadata (
 INSERT OR IGNORE INTO drillip_metadata VALUES ('backup_format_version', '1');`
 
 func openDatabaseFile(path, mode string) (*sql.DB, error) {
+	if path != ":memory:" {
+		absolute, err := filepath.Abs(path)
+		if err != nil {
+			return nil, err
+		}
+		path = filepath.ToSlash(absolute)
+		// URI paths need a leading slash, including Windows drive paths.
+		if path[0] != '/' {
+			path = "/" + path
+		}
+	}
 	query := url.Values{"mode": {mode}, "_pragma": {"busy_timeout(5000)"}}
 	u := url.URL{Scheme: "file", Path: path, RawQuery: query.Encode()}
 	if path == ":memory:" {
