@@ -15,7 +15,7 @@ is a demonstration; keep your application's own server for a real deployment.
 
 Keep your application's base image and copy `/drillip` from a pinned Drillip
 release into `/usr/local/bin/drillip` with a multi-stage build. The example uses
-`ghcr.io/philhem/drillip:v0.3.14` and builds for `linux/amd64`. Verify that the
+`ghcr.io/philhem/drillip:v0.3.15` and builds for `linux/amd64`. Verify that the
 binary matches your target architecture if you change the source image.
 
 Install your image's CA certificates package if Drillip needs outbound TLS,

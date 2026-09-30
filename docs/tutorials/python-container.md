@@ -20,7 +20,7 @@ cd examples/python-container
 docker compose up --build --wait --wait-timeout 60
 ```
 
-The default image pins Drillip v0.3.14. To test the current checkout instead,
+The default image pins Drillip v0.3.15. To test the current checkout instead,
 from the repository root run `docker build -t drillip:local .`, then use
 `DRILLIP_IMAGE=drillip:local docker compose up --build --wait --wait-timeout 60`
 in the example directory. The CLI and embedded server then use the same build.
