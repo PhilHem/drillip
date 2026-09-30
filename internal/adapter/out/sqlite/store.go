@@ -25,7 +25,9 @@ func (s *Store) RawDB() *sql.DB {
 
 // Open creates a new Store backed by the SQLite database at path.
 func Open(path string) (*Store, error) {
-	sqlDB, err := sql.Open("sqlite", path)
+	// Driver pragmas apply to every pooled connection, including the connection
+	// that records a completed backup while the other connection keeps writing.
+	sqlDB, err := openDatabaseFile(path, "rwc")
 	if err != nil {
 		return nil, err
 	}
