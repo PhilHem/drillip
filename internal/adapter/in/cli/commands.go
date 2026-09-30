@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 	"time"
 
 	inport "github.com/PhilHem/drillip/internal/application/port/in"
@@ -16,6 +17,63 @@ import (
 type CLI struct {
 	Errors      inport.Errors
 	Correlation inport.Correlator
+	// CommandPrefix preserves the selected backend in pagination hints.
+	// An empty prefix defaults to drillip.
+	CommandPrefix []string
+}
+
+func (c *CLI) runList(ctx context.Context, cmd *Command, w io.Writer) error {
+	page, err := c.Errors.List(ctx, cmd.listQuery)
+	if err != nil {
+		return err
+	}
+	if len(page.Errors) == 0 {
+		fmt.Fprintln(w, "no matching errors on this page")
+		return nil
+	}
+	printErrorSummaries(w, page.Errors)
+	hints := []string{commandPrefix(c.CommandPrefix) + " show <fingerprint>"}
+	if page.HasMore {
+		query := cmd.listQuery
+		query.Offset += len(page.Errors)
+		hints = append(hints, listPageCommand(query, c.CommandPrefix))
+	}
+	printHint(w, hints...)
+	return nil
+}
+
+func listPageCommand(query domain.ListQuery, prefix []string) string {
+	command := fmt.Sprintf("%s list --sort %s --limit %d --offset %d", commandPrefix(prefix), query.Sort, query.Limit, query.Offset)
+	if query.Search != "" {
+		command += " --search " + shellQuote(query.Search)
+	}
+	if query.Filter.Level != "" {
+		command += " --level " + shellQuote(query.Filter.Level)
+	}
+	if query.Filter.TagKey != "" {
+		command += " --tag " + shellQuote(query.Filter.TagKey+"="+query.Filter.TagVal)
+	}
+	return command
+}
+
+func commandPrefix(prefix []string) string {
+	if len(prefix) == 0 {
+		return "drillip"
+	}
+	words := make([]string, len(prefix))
+	for i, word := range prefix {
+		words[i] = shellQuote(word)
+	}
+	return strings.Join(words, " ")
+}
+
+func shellQuote(value string) string {
+	if value != "" && strings.Trim(value, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_@%+=:,./-") == "" {
+		return value
+	}
+	// Single quotes keep arbitrary values literal in a POSIX shell. Close and
+	// reopen the quoted string around any embedded single quote.
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
 func (c *CLI) runTop(ctx context.Context, cmd *Command, w io.Writer) error {
@@ -30,6 +88,12 @@ func (c *CLI) runTop(ctx context.Context, cmd *Command, w io.Writer) error {
 		return nil
 	}
 
+	printErrorSummaries(w, summaries)
+	printHint(w, "drillip show <fingerprint>")
+	return nil
+}
+
+func printErrorSummaries(w io.Writer, summaries []domain.ErrorSummary) {
 	var tableRows [][]string
 	for _, e := range summaries {
 		t, _ := time.Parse(time.RFC3339, e.LastSeen)
@@ -39,8 +103,6 @@ func (c *CLI) runTop(ctx context.Context, cmd *Command, w io.Writer) error {
 	}
 
 	printTable(w, []string{"FINGERPRINT", "COUNT", "LEVEL", "STATE", "TYPE", "VALUE", "LAST SEEN"}, tableRows)
-	printHint(w, "drillip show <fingerprint>")
-	return nil
 }
 
 func (c *CLI) runRecent(ctx context.Context, cmd *Command, w io.Writer) error {

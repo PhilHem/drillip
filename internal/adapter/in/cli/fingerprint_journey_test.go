@@ -14,7 +14,7 @@ import (
 )
 
 func TestDisplayedFingerprintsRemainActionableWhenPrefixesCollide(t *testing.T) {
-	for _, listCommand := range []string{"top", "recent"} {
+	for _, listCommand := range []string{"list", "top", "recent"} {
 		t.Run(listCommand, func(t *testing.T) {
 			s := setupStore(t)
 			app := service.New(s, nil, nil)
