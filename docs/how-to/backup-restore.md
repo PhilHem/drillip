@@ -1,25 +1,33 @@
 # Back up and restore a Docker database volume
 
-Use this procedure to archive an existing Drillip named volume and verify its
-restoration into a new volume. It requires a short tracker outage while copying
-the stopped volume. Events sent during that outage might not be delivered;
-pause senders or arrange application-side buffering first.
+Use this guide to back up a Drillip volume and check the restored data on the
+same Docker host. The backup requires a short server outage.
 
-These commands cover the standard Docker deployment with `/data/errors.db`,
-Drillip v0.3.15, and the image's default user. You need Docker, Bash, `curl`,
-`jq`, and enough space for the archive and restored volume. Use the same Bash
-session throughout. The source container must remain present after stopping
-(no `--rm`), and must be the only process using the volume. Suspend any job or
-orchestrator that could restart it or run local database maintenance.
+## Before you start
 
-The archive contains database data, including stored event context. Keep its
-access as restricted as the tracker. Save your deployment configuration separately;
-the volume does not contain container options or externally supplied credentials.
+You need:
 
-## 1. Select the source and prepare a backup directory
+- Docker, Bash, `curl`, and `jq`.
+- A Drillip container with a named volume mounted at `/data` and its database at
+  `/data/errors.db`. These steps were checked with v0.3.18 and the image's default user.
+- A container that remains available after it stops. Do not use `--rm` for the source container.
+- Enough disk space for the backup and a restored volume.
+- A free host port, `18301`, for the restore check.
 
-Find the source container with `docker ps`, then set its actual name or ID,
-volume name, and reachable URL:
+The source container must be the only process that uses the volume. Stop any
+database maintenance commands. Suspend any job that could restart the container.
+
+Save your deployment configuration separately. The volume does not contain
+container settings or credentials supplied through the environment.
+Keep the backup under the same access controls as the database.
+
+Run the commands in the same Bash session. Continue only if each command succeeds.
+In `console` blocks, `$` marks a command. Lines without `$` show example output.
+
+## 1. Select the source
+
+Use `docker ps` to find the source container. Replace the container name, volume
+name, and server URL below with your values:
 
 ```bash
 set -euo pipefail
@@ -36,14 +44,23 @@ docker inspect --format '{{range .Mounts}}{{println .Name .Destination}}{{end}}'
 docker pull alpine:3.23
 ```
 
-Confirm that the selected volume is mounted at `/data`. The helper image supplies
-`tar`; pulling it now avoids adding download time to the outage. The image ID
-records the exact locally available Drillip build to use for this restore check.
+Check that the mount list shows your volume at `/data`. For the example values,
+the line is:
 
-## 2. Record the data to check after restoration
+```text
+drillip-data /data
+```
 
-Pause senders and other operator writes. Record all group fingerprints, counts,
-resolution status, and the number of retained occurrences:
+The Alpine image supplies `tar`. Download it before you stop the server.
+The `image-id.txt` file records the exact local Drillip image for the restore check.
+
+## 2. Record the current data
+
+Pause error reports from your applications. Pause operator commands that
+change stored data. Keep these writes paused until step 4.
+
+Define a function to record group fingerprints, counts, resolution states,
+and the total number of stored occurrences. Then record the source data:
 
 ```bash
 snapshot() {
@@ -58,14 +75,18 @@ snapshot() {
 snapshot "$source_url" "$backup_dir/before"
 ```
 
-The comparison records whether each group is resolved. An unresolved group's
-displayed state can age from `new` to `ongoing` while the tracker is stopped;
-that is not lost state. See [the lifecycle explanation](../explanation/error-lifecycle.md).
+The function saves two comparison files in the backup directory.
+It records whether a group is resolved. An unresolved group can change from
+`new` to `ongoing` during the outage; see the
+[lifecycle explanation](../explanation/error-lifecycle.md).
 
-## 3. Stop the owner and archive the whole volume
+## 3. Stop the server and create the backup
+
+Stop the source container. Check its exit status and check for other containers
+that use the volume. Then copy the complete volume:
 
 ```bash
-docker stop --time 30 "$source_container"
+docker stop --timeout 30 "$source_container"
 test "$(docker inspect --format '{{.State.Status}}:{{.State.ExitCode}}' \
   "$source_container")" = exited:0
 test -z "$(docker ps --quiet --filter volume="$source_volume")"
@@ -77,37 +98,41 @@ docker run --rm -i alpine:3.23 tar -tzf - \
 printf 'Backup directory: %s\n' "$backup_dir"
 ```
 
-Continue only if every command succeeds. If the exit check fails, inspect the
-container logs and establish why shutdown failed before accepting a backup.
-The container check does not detect host processes: the sole-owner prerequisite
-also excludes host-side SQLite or maintenance commands.
+The final command prints the backup directory. Your directory name will differ:
 
-Drillip uses SQLite WAL mode. Copying only a live `errors.db` can omit committed
-transactions. The archive above copies the entire stopped volume, including any
-remaining `errors.db-wal` and `errors.db-shm` files; do not remove those files by
-hand. SQLite documents why the [WAL must remain with its database](https://sqlite.org/wal.html#the_wal_file).
-For a backup without an outage, use a tool implementing
-[SQLite's Online Backup API](https://sqlite.org/backup.html); plain live-file
-copying is not an equivalent procedure.
-
-The copy is complete. Restart the original tracker and resume senders after its
-health check succeeds:
-
-```bash
-docker start "$source_container"
-curl --fail --silent --show-error \
-  --retry 10 --retry-connrefused --retry-delay 1 "$source_url/-/healthy"
+```text
+Backup directory: /home/operator/drillip-backup.A1b2C3
 ```
 
-Expect `ok`. Keep the backup directory, including its comparison files, outside
-the database volume. Copy it to your backup storage under the same access controls.
+If a command fails, do not use the backup. Restart the source container with
+step 4 before you inspect the failure. If Bash exited, open a new session and
+set `source_container` and `source_url` again.
 
-## 4. Restore into a fresh volume
+Keep all files in the backup. Do not copy only `errors.db` or delete its SQLite
+write-ahead log files. See [SQLite's database backup requirements](https://sqlite.org/wal.html#the_wal_file).
 
-Use unused names and a free host port `18301`. The original volume and archive
-remain intact. For a later restore, set `backup_dir` to the saved backup directory
-and load `image` from its `image-id.txt`; that exact image must be available on
-the Docker host.
+## 4. Restart the source server
+
+Start the source container and check its health:
+
+```console
+$ docker start "$source_container"
+drillip
+$ curl --fail --silent --show-error --write-out '\n' \
+    --retry 10 --retry-connrefused --retry-delay 1 "$source_url/-/healthy"
+ok
+```
+
+The first output line is your container's name. Resume application and operator
+writes after the health check succeeds.
+
+Keep the complete backup directory, including its comparison files and image ID.
+Copy it to your backup storage. Keep the recorded Drillip image available for the restore check.
+
+## 5. Restore the backup to a new volume
+
+Create a new volume and extract the backup. Start a test container with the
+recorded Drillip image:
 
 ```bash
 restore_id="$(date -u +%Y%m%dT%H%M%S)-$$"
@@ -127,42 +152,50 @@ docker run --detach --name "$restored_container" \
   "$image" serve --listen 0.0.0.0:8300 --db /data/errors.db
 ```
 
-Extraction preserves the volume files' numeric ownership and permissions. The
-standard image can use these unchanged. If your deployment uses a custom user,
-restore with that same UID/GID and ensure it can write both the database and its
-directory; do not solve a permission failure with world-writable permissions.
+The restored files keep their ownership and permissions. The test container uses
+the image's default user. It has no email or external telemetry configuration.
+Keep applications connected to the source server during this check.
 
-This verification container uses the original image and restored data, without
-SMTP or remote telemetry configuration. Keep applications pointed at the original
-tracker during the check. Recreating the production deployment later requires
-its separately saved configuration.
+## 6. Check the restored data
 
-## 5. Verify the restored data
+Set the test server URL and check its health:
 
-```bash
-restored_url=http://127.0.0.1:18301
-curl --fail --silent --show-error \
-  --retry 10 --retry-connrefused --retry-delay 1 "$restored_url/-/healthy"
-snapshot "$restored_url" "$backup_dir/after"
-diff -u "$backup_dir/before.stats.json" "$backup_dir/after.stats.json"
-diff -u "$backup_dir/before.groups.json" "$backup_dir/after.groups.json"
+```console
+$ restored_url=http://127.0.0.1:18301
+$ curl --fail --silent --show-error --write-out '\n' \
+    --retry 10 --retry-connrefused --retry-delay 1 "$restored_url/-/healthy"
+ok
 ```
 
-Expect `ok` and no differences: the same fingerprints, occurrence counts,
-resolution status, and retained occurrence total. Investigate any difference
-before using the restored copy. Writes between the baseline and shutdown, or
-scheduled lifecycle maintenance, can change these values; health alone does not
-verify a restore. A group count can exceed retained occurrences because of
-[retention](../explanation/error-lifecycle.md#retention-removes-occurrence-history).
+Record the restored data. Compare it with the files from step 2:
 
-Stop the verification container when finished:
-
-```bash
-docker stop --time 30 "$restored_container"
+```console
+$ snapshot "$restored_url" "$backup_dir/after"
+$ diff -u "$backup_dir/before.stats.json" "$backup_dir/after.stats.json"
+$ diff -u "$backup_dir/before.groups.json" "$backup_dir/after.groups.json"
 ```
 
-The restored volume remains available. For recovery, stop the current tracker,
-point your normal deployment at this volume, and use the saved configuration and
-matching image. Check health before resuming senders. Keep the original volume
-and backup until the restored deployment is verified; none of the commands above
-delete them.
+All three commands must succeed without output. This confirms matching group
+fingerprints, counts, resolution states, and the total number of stored occurrences.
+
+If `diff` shows a difference, investigate it before you use the restored data.
+Writes or scheduled server tasks between step 2 and shutdown can change the data.
+A successful health check alone does not confirm that the data matches.
+
+## 7. Stop the test container
+
+```console
+$ docker stop --timeout 30 "$restored_container"
+drillip-restore-check-20260930T120000-12345
+```
+
+The output shows your test container's name. The restored volume remains available.
+
+To use the restored volume for recovery:
+
+1. Pause application and operator writes.
+2. Stop the current Drillip server.
+3. Start your normal deployment with the restored volume, recorded image, and saved configuration.
+4. Check server health before you resume writes.
+
+Keep the original volume and backup until you have checked the recovered deployment.
