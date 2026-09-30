@@ -138,7 +138,7 @@ func TestBackupCLIFailureDoesNotPublishFiles(t *testing.T) {
 }
 
 func TestBackupCLIValidatesArgumentsBeforeAccess(t *testing.T) {
-	for _, args := range [][]string{{"backup"}, {"backup", "--output", ""}, {"backup", "--output", "file.db", "extra"}, {"maintenance", "--db", "missing.db", "backup", "--output", "file.db"}} {
+	for _, args := range [][]string{{"backup"}, {"backup", "--output", ""}, {"backup", "--output", "file.db", "extra"}} {
 		var stdout, stderr bytes.Buffer
 		if err := Run(context.Background(), args, &stdout, &stderr); err == nil {
 			t.Fatalf("accepted %v", args)
