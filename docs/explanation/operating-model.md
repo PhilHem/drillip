@@ -73,9 +73,9 @@ your application's SDK to remove secrets and unwanted personal data before sendi
 Drillip's ingest sanitization truncates and normalizes fields; it is not sensitive-
 data redaction.
 
-## Normal commands ask the server
+## Investigation and management use the server
 
-In the current checkout, normal CLI commands use `DRILLIP_SERVER` or `--server`.
+Investigation and management commands use `DRILLIP_SERVER` or `--server`.
 They do not need access to the database file. The running server provides the
 same grouping and management operations to both CLI and HTTP clients and owns
 SMTP and observability configuration. A shell's SMTP variables do not change the
@@ -85,12 +85,6 @@ The client checks server command-API compatibility before an operation. This
 prevents older servers from silently ignoring newer operation parameters.
 `health` checks availability separately, so a healthy older server can still be
 incompatible with a newer command client.
-
-Local `maintenance --db PATH` is an explicit alternative when an operator needs
-an existing database directly. It performs no network requests, sends no email,
-and returns stored correlation context without external telemetry. It does not
-queue notifications for a later server restart. Use the normal server path when
-you want normal notification and diagnostic behavior.
 
 See [switch CLI access to the server](../how-to/upgrade-cli.md) for a tested
 procedure and [CLI reference](../reference/cli.md) for exact option precedence.

@@ -16,7 +16,6 @@ With no command, `drillip` starts the server, as does `drillip serve`.
 drillip [--server <URL>] <command> [arguments]
 drillip serve [--listen <host:port>] [--db <path>]
 drillip restore --input <backup-path> [--db <new-path>]
-drillip maintenance --db <existing-path> <command> [arguments]
 ```
 
 | Option | Effect |
@@ -25,7 +24,6 @@ drillip maintenance --db <existing-path> <command> [arguments]
 | `serve --listen <host:port>` | Server bind address; overrides `DRILLIP_ADDR`. |
 | `serve --db <path>` | Server SQLite path; overrides `DRILLIP_DB`. |
 | `restore --db <path>` | New local destination; required unless `DRILLIP_DB` supplies it. |
-| `maintenance --db <path>` | Explicit existing local database; no environment fallback. |
 | `--help`, `<command> --help` | Print help without opening a database or contacting a server. |
 
 Put `--server` before the command, and command options before positional
@@ -94,8 +92,7 @@ applied by the server, using the database's whole-second timestamp precision.
 
 `backup --output <path>` requires a new local filename. It uses the selected
 server and checks for the `database_backup` capability. An older server reports
-an upgrade requirement before any backup download starts. Local `maintenance`
-mode does not support this command.
+an upgrade requirement before any backup download starts.
 
 ```console
 $ drillip backup --output drillip-backup.db
@@ -195,7 +192,7 @@ the group's stored type and message, including text beyond the list's shortened
 Use `show` with a result's full fingerprint to read its details.
 
 When more matches exist, the output includes a next-page command that preserves
-the server or maintenance database, search, filters, sort order, and page size.
+the server, search, filters, sort order, and page size.
 Pages are separate queries: incoming errors can change their order between calls.
 Repeat the search from the first page if new activity changes the results.
 
@@ -209,27 +206,6 @@ feature in its
 If it does not, `list` asks you to upgrade the server. Existing commands continue
 to work with command API version 1 servers that do not offer this feature.
 
-## Local maintenance
-
-Use explicit maintenance when the server is unavailable and you deliberately
-want direct access to its existing database:
-
-```sh
-drillip maintenance --db /data/errors.db show 04827c
-drillip maintenance --db /data/errors.db resolve 04827c
-```
-
-Maintenance supports the same investigation and management commands, except
-`health`. It never sends HTTP requests or email, and does not queue notifications
-for later delivery. Correlation includes stored context only; remote telemetry
-and journal lookups are disabled. Missing database files are rejected to avoid
-silently creating the wrong database. A configured `DRILLIP_SERVER` or
-`DRILLIP_DB` does not change an explicit maintenance invocation. Explicit global
-server/database flags are rejected with maintenance.
-
-Normal `resolve` confirms the state change, not SMTP delivery. The running server
-owns notification configuration and delivery retries.
-
 ## Upgrade from earlier CLI versions
 
 Upgrade the server together with the CLI. Before each normal API operation, the
@@ -240,14 +216,17 @@ API endpoints and duration parameters.
 
 | Earlier invocation | Current invocation |
 |---|---|
-| `drillip --db /data/errors.db show 04827c` | `drillip --server http://127.0.0.1:8300 show 04827c`, or explicit `maintenance --db /data/errors.db show 04827c` |
-| `drillip --offline --db /data/errors.db resolve 04827c` | `drillip maintenance --db /data/errors.db resolve 04827c` |
+| `drillip --db /data/errors.db show 04827c` | `drillip --server http://127.0.0.1:8300 show 04827c` |
+| `drillip maintenance --db /data/errors.db show 04827c` | `drillip --server http://127.0.0.1:8300 show 04827c` |
+| `drillip --offline --db /data/errors.db resolve 04827c` | `drillip --server http://127.0.0.1:8300 resolve 04827c` |
 | `drillip --addr 0.0.0.0:8300 --db /data/errors.db serve` | `drillip serve --listen 0.0.0.0:8300 --db /data/errors.db` |
 
-`--offline` now fails with migration instructions. Global `--db` remains a legacy
-server-start option and is rejected for normal commands. `DRILLIP_DB` does not
-select local command execution. New normal commands require a running server;
-use maintenance for deliberate local access.
+`maintenance` and `--offline` fail with migration instructions. Global `--db`
+remains a legacy server-start option and is rejected for client commands.
+`DRILLIP_DB` does not select local command execution. To use a local database,
+start `drillip serve --db PATH`, then use `drillip --server URL COMMAND`.
+Resolution uses the server's notification configuration. Success confirms the
+state change, not email delivery.
 
 ## Fingerprints
 

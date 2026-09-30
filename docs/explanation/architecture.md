@@ -2,9 +2,8 @@
 
 Drillip separates application behavior from the protocols, storage, and
 external services that deliver it. HTTP handlers call inbound ports. Normal CLI
-commands reach the server through the HTTP client. Explicit local maintenance
-uses application services directly. Services coordinate domain models through
-explicit port interfaces.
+commands reach the server through the HTTP client. Services coordinate domain
+models through explicit port interfaces.
 
 The directories identify each part's role:
 
@@ -93,8 +92,7 @@ connects them to services and adapters. It also runs the server lifecycle and
 dispatches CLI commands. Parsing produces a validated invocation before any
 backend is connected. Normal commands use one HTTP client implementing the
 application operations; the server owns storage, notification, and telemetry
-policy. Explicit maintenance opens the selected existing database and constructs
-the application without a notifier or telemetry adapter.
+policy. Local restore checks and publishes a backup without starting the server.
 
 The HTTP client accepts context on each operation and encapsulates target URLs,
 query encoding, compatibility checks, deadlines, status errors, and response

@@ -77,7 +77,7 @@ func TestResolveCLIUsesServerPolicyAndNeverOpensLocalDatabase(t *testing.T) {
 	}
 }
 
-func TestResolveOfflineIsExplicitAndNoFallbackOccurs(t *testing.T) {
+func TestResolveFailureNeverFallsBackToLocalDatabase(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "errors.db")
 	s, err := store.Open(db)
 	if err != nil {
@@ -109,17 +109,14 @@ func TestResolveOfflineIsExplicitAndNoFallbackOccurs(t *testing.T) {
 	if err != nil || detail.ResolvedAt != "" {
 		t.Fatal("failed HTTP request mutated local database")
 	}
-	if err := Run(context.Background(), []string{"maintenance", "--db", db, "resolve", event.Fingerprint}, &stdout, &stderr); err != nil {
-		t.Fatal(err)
-	}
-	detail, _ = s.GetDetail(event.Fingerprint)
-	if detail.ResolvedAt == "" || serverCalls.Load() != 1 {
-		t.Fatalf("offline result: %+v, calls=%d", detail, serverCalls.Load())
-	}
-	for _, args := range [][]string{{"--offline", "top"}, {"--db", db, "resolve", event.Fingerprint}} {
+	for _, args := range [][]string{{"--offline", "top"}, {"--db", db, "resolve", event.Fingerprint}, {"maintenance", "--db", db, "resolve", event.Fingerprint}} {
 		if err := Run(context.Background(), args, &stdout, &stderr); err == nil {
 			t.Fatalf("accepted invalid mode: %v", args)
 		}
+	}
+	detail, err = s.GetDetail(event.Fingerprint)
+	if err != nil || detail.ResolvedAt != "" || serverCalls.Load() != 1 {
+		t.Fatalf("failed commands changed state or retried: %+v, calls=%d, err=%v", detail, serverCalls.Load(), err)
 	}
 }
 
