@@ -5,14 +5,11 @@ after you fix the application.
 
 Before you start, you need:
 
-- The Drillip command-line client (`drillip`), installed on your computer.
+- The Drillip command-line client (`drillip`), version v0.3.16 or later, installed on your computer.
 - A running Drillip server, version v0.3.15 or later.
 - The server's HTTP or HTTPS URL.
 
-This guide uses a client that prints full, 16-character fingerprints.
-That change is not yet released; the v0.3.15 client prints shortened fingerprints.
-To get the current client, follow the
-[build and installation instructions](../../CONTRIBUTING.md#build-from-a-checkout).
+To install the client, follow the [binary installation instructions](run-drillip.md#binary).
 
 Set `DRILLIP_SERVER` to your server's URL. Replace the example URL below.
 Use the same shell for the remaining commands:
