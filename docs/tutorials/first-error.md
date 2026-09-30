@@ -18,7 +18,7 @@ docker run --detach --rm \
   --mount type=tmpfs,destination=/data \
   --env DRILLIP_DB=/data/errors.db \
   --env DRILLIP_ADDR=0.0.0.0:8300 \
-  ghcr.io/philhem/drillip:v0.3.14
+  ghcr.io/philhem/drillip:v0.3.18
 ```
 
 Docker prints the container ID. This instance is reachable on your machine at

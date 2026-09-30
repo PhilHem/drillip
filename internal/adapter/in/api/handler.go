@@ -460,20 +460,46 @@ func (h *Handler) HandleTestEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.Notifications == nil {
-		writeError(w, http.StatusServiceUnavailable, "notifications not configured")
+		writeNotificationsDisabled(w)
 		return
 	}
 	recipient, err := h.Notifications.SendTestEmail()
 	if errors.Is(err, inport.ErrNotificationsDisabled) {
-		writeError(w, http.StatusServiceUnavailable, "notifications not configured")
+		writeNotificationsDisabled(w)
 		return
 	}
 	if err != nil {
 		slog.Error("test email failed", "err", err)
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("send failed: %v", err))
+		var diagnosis *domain.NotificationError
+		if !errors.As(err, &diagnosis) {
+			diagnosis = &domain.NotificationError{
+				Code:    "smtp_delivery_failed",
+				Message: "The SMTP send attempt failed.",
+				Hint:    "Check the recipient mailbox and SMTP server logs before retrying; the message may have been accepted.",
+			}
+		}
+		writeNotificationError(w, http.StatusBadGateway, diagnosis)
 		return
 	}
 	writeJSON(w, map[string]string{"status": "sent", "to": recipient})
+}
+
+func writeNotificationsDisabled(w http.ResponseWriter) {
+	writeNotificationError(w, http.StatusServiceUnavailable, &domain.NotificationError{
+		Code:    "notifications_not_configured",
+		Message: "notifications not configured",
+		Hint:    "Set DRILLIP_SMTP_HOST and DRILLIP_SMTP_TO in the server environment. For Docker, recreate the container; otherwise restart the Drillip server.",
+	})
+}
+
+func writeNotificationError(w http.ResponseWriter, status int, diagnosis *domain.NotificationError) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{
+		"error": diagnosis.Message,
+		"code":  diagnosis.Code,
+		"hint":  diagnosis.Hint,
+	})
 }
 
 // writeError writes a structured JSON error response.

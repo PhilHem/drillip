@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/tls"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net"
 	"net/http/httptest"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/PhilHem/drillip/internal/domain"
 )
 
 func TestSMTPTransportDeliversAndVerifiesTLS(t *testing.T) {
@@ -112,6 +115,14 @@ func TestSMTPTransportDeliversAndVerifiesTLS(t *testing.T) {
 				}
 				if tx.body != "" {
 					t.Fatal("sent message before certificate validation")
+				}
+				var diagnosis *domain.NotificationError
+				var verification *tls.CertificateVerificationError
+				if !errors.As(err, &diagnosis) || diagnosis.Code != "smtp_tls_failed" || !errors.As(err, &verification) {
+					t.Fatalf("want TLS diagnosis preserving verification error, got %v", err)
+				}
+				if !strings.Contains(diagnosis.Hint, "keep certificate verification enabled") {
+					t.Fatalf("TLS advice must preserve verification: %s", diagnosis.Hint)
 				}
 				return
 			}

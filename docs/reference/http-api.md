@@ -1,8 +1,7 @@
 # HTTP API reference
 
 This describes the current checkout. Command API version 1 and absolute-time
-parameters are available from v0.3.15 and require a matching server build; the
-pinned v0.3.14 examples use the older relative-parameter API.
+parameters are available from v0.3.15 and require a matching server build.
 
 The API deliberately has no separate credentials or roles. Access control belongs
 to the [deployment boundary](../explanation/operating-model.md#reuse-the-deployments-access-boundary),
@@ -38,6 +37,7 @@ Events are sanitized at ingest: oversized fields are truncated, invalid levels n
 
 | Method | Path | Description |
 |---|---|---|
+| `GET` | `/api/0/list/` | Search and page through error groups; newest last occurrence first by default |
 | `GET` | `/api/0/top/` | Errors sorted by occurrence count; `limit` defaults to 25 |
 | `GET` | `/api/0/recent/?hours=1` | Errors first seen within the last N hours (max 8760) |
 | `GET` | `/api/0/show/<fp>/` | Error detail with tag distribution |
@@ -56,12 +56,41 @@ default; values above `8760` are capped at `8760`. For `correlate`, `nth`
 defaults to `1` (the most recent occurrence); invalid or non-positive values
 use that default.
 
-`top`, `recent`, and `show` include a `state` field: `new`, `ongoing`, or
+`list`, `top`, `recent`, and `show` include a `state` field: `new`, `ongoing`, or
 `resolved`. See the [lifecycle explanation](../explanation/error-lifecycle.md).
 Correlation returns the available context; unconfigured or unavailable
 integrations can leave sections absent. Optional enrichment has a shared five-second
 budget so stored context remains available when a source stalls. A missing retained
 occurrence leaves optional context absent; an actual storage failure returns 500.
+
+### Search and pagination
+
+`GET /api/0/list/` accepts these query parameters:
+
+| Parameter | Effect |
+|---|---|
+| `search` | Literal substring of the stored group type or message; empty means no text filter. ASCII case is ignored; other characters match exactly. `%` and `_` are literal. |
+| `sort` | `last_seen` (default) or `count`, descending. Count ties use last occurrence descending; both orders use fingerprint ascending as the final tie-breaker. |
+| `level` | Filter by severity. |
+| `tag` | Filter by `key=value` in the tags stored when the group was created. |
+| `limit` | Maximum results per page, `1`–`500`; default `50`. |
+| `offset` | Number of matching groups to skip, at least `0`; default `0`. |
+
+Filters apply before pagination. The response is an object with `errors`, an
+array of [error summaries](#error-summaries-and-detail), and `has_more`, a boolean.
+Resolved groups are included. Search examines the group's complete stored type
+and message, not a per-occurrence message history.
+
+When no groups match or the offset is past the last match, the response is:
+
+```json
+{"errors": [], "has_more": false}
+```
+
+When `has_more` is true, request the next page with the same query parameters
+and increase `offset` by the number of returned errors. Requests do not share a
+snapshot; new occurrences can change the order between pages. Invalid sort,
+limit, offset, or tag syntax returns HTTP `400`.
 
 ## Actions
 
@@ -79,14 +108,77 @@ occurrence leaves optional context absent; an actual storage failure returns 500
 `30d`, or `2w`. A silence without `duration` or `expires_at` does not expire. The optional
 `reason` is truncated to 500 bytes. URL-encode query parameter values.
 
-The test-email endpoint returns `{"status":"sent","to":"<recipient>"}`
-when SMTP accepts the message, HTTP `503` when notifications are not configured,
-and HTTP `502` when sending fails. See the
+The test-email endpoint returns HTTP `200` when SMTP accepts the message:
+
+```json
+{"status":"sent","to":"ops@example.com"}
+```
+
+`to` contains the configured recipient. The endpoint returns HTTP `503` when
+notifications are not configured, and HTTP `502` when sending fails. See the
 [email setup guide](../how-to/email-notifications.md) for a complete check.
+
+### Test-email errors
+
+The `code` and `hint` fields are available from v0.3.18. Servers through
+v0.3.17 return only `error`.
+
+Delivery and configuration failures include three string fields: `error` is a
+human-readable diagnosis, `code` is its stable identifier, and `hint` suggests
+the next check. For example, a rejected SMTP login returns HTTP `502`:
+
+```json
+{
+  "error": "The SMTP server rejected authentication.",
+  "code": "smtp_auth_rejected",
+  "hint": "Check DRILLIP_SMTP_USER, DRILLIP_SMTP_PASS, and the provider's authentication requirements."
+}
+```
+
+| Code | Meaning |
+|---|---|
+| `notifications_not_configured` | SMTP host or recipient is not configured; HTTP `503`. |
+| `smtp_connection_failed` | Name lookup, connection establishment, or an established connection failed. |
+| `smtp_timeout` | An SMTP operation exceeded its deadline. This can occur during any step, including authentication. |
+| `smtp_tls_failed` | STARTTLS or its TLS session setup failed. Certificate verification remains enabled by default. |
+| `smtp_auth_rejected` | The SMTP server explicitly rejected authentication. |
+| `smtp_auth_failed` | Authentication could not complete, for example because the endpoint lacks the required authentication or transport support. |
+| `smtp_sender_rejected` | The SMTP server rejected the sender address. |
+| `smtp_recipient_rejected` | The SMTP server rejected the recipient address. |
+| `smtp_delivery_failed` | Sending failed without a more specific diagnosis. Check the server logs for the underlying error. |
+| `notifications_unavailable` | The notifier is shutting down or has stopped. |
+
+All codes except `notifications_not_configured` use HTTP `502`. A timeout or
+connection failure during authentication is reported as such; it does not imply
+incorrect credentials. Raw SMTP and network error details are recorded in the
+Drillip server logs.
+
+A failure near the end of an SMTP exchange can occur after the server accepted
+the message. Check the recipient mailbox and SMTP server logs before retrying
+when the hint reports this uncertainty.
+
+Use `code` for automation and display `error` and `hint` to operators. The text
+can change independently of the code. Older servers can return only `error`,
+and clients must allow unknown codes. The existing `error` string and HTTP
+statuses are retained; no command API version change is required. Requests with
+a method other than POST still return HTTP `405` with an `error` string.
 
 ## Command API compatibility and exact times
 
-`GET /api/0/capabilities/` returns `{"command_api":1}`. Version 1 promises:
+`GET /api/0/capabilities/` returns:
+
+```json
+{"command_api": 1, "features": ["error_list"]}
+```
+
+`features` advertises additive operations. The `error_list` feature is available
+from v0.3.17. It promises the search and pagination contract of `/api/0/list/`.
+The `list` client checks for this feature
+and reports an upgrade requirement if it is absent; it does not fall back to
+another query. Older version 1 servers can omit `features`. The base version
+stays at `1`, so existing clients and commands remain compatible.
+
+Version 1 promises:
 
 - `top?limit=N` accepts a positive limit; list entries include `first_seen`.
 - `recent?since=TIMESTAMP` and `trend/<fp>/?since=TIMESTAMP` accept absolute start times.
@@ -139,6 +231,7 @@ Unless noted otherwise, timestamps generated by Drillip are UTC RFC3339 strings.
 ### Error summaries and detail
 
 `top` and `recent` return arrays of error summaries (`[]` when empty).
+`list` wraps the same summaries in its `errors` array with a `has_more` boolean.
 `show` returns one detail object with the same summary fields plus the detail
 fields below.
 
@@ -149,13 +242,13 @@ fields below.
 | `level` | string | Stored severity. |
 | `type` | string | Exception type, or `message` for a message event. |
 | `value` | string | Stored exception value or message text. |
+| `first_seen` | string | Time the error was first recorded. |
 | `last_seen` | string | Time of the latest stored occurrence. |
 | `state` | string | `new`, `ongoing`, or `resolved`. |
 | `resolved_at` | string, optional | Resolution time; absent while unresolved. |
 
 | Additional detail field | JSON type | Meaning |
 |---|---|---|
-| `first_seen` | string | Time the error was first recorded. |
 | `release`, `environment`, `platform` | string, optional | Stored event metadata. |
 | `stacktrace` | object or null, optional | Stored Sentry stacktrace. |
 | `breadcrumbs` | array or null, optional | Stored Sentry breadcrumb entries. |
