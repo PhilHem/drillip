@@ -49,14 +49,14 @@ command from your existing scheduler with a different filename for each backup.
 
 ## 3. Restore into a new Docker volume
 
-You need Docker, the Alpine helper image, and a Drillip image from the same build
+You need Docker and a Drillip image from the same build
 as the source server. This example uses `drillip:local` from the
 [checkout build instructions](upgrade-cli.md#1-build-and-replace-the-executable)
 and the image's default user. Host port `18301` must be free.
 
 Keep applications connected to the current server during the restore check.
 Replace `restore_image` with your matching image. Run this script to create an
-unused volume and copy the backup into it:
+unused volume and restore the backup into it:
 
 ```bash
 set -euo pipefail
@@ -73,11 +73,18 @@ docker volume create "$restored_volume"
 docker run --rm \
   --mount "type=bind,src=$backup_file,dst=/backup.db,readonly" \
   --mount "type=volume,src=$restored_volume,dst=/data" \
-  alpine:3.23 cp /backup.db /data/errors.db
+  "$restore_image" restore --input /backup.db
 docker run --detach --name "$restored_container" \
   --mount "type=volume,src=$restored_volume,dst=/data" \
   --publish 127.0.0.1:18301:8300 \
   "$restore_image" serve --listen 0.0.0.0:8300 --db /data/errors.db
+```
+
+Drillip checks the backup and writes a new database. It does not replace an
+existing database. The restore command reports the destination:
+
+```text
+restored /data/errors.db
 ```
 
 Continue only if each command succeeds. The test container uses the restored
