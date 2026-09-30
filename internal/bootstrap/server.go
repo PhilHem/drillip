@@ -50,7 +50,7 @@ func runServe(ctx context.Context, cfg config) (err error) {
 	}
 
 	app := service.New(s, notifier, integrations.Client{Config: cfg.Integrations})
-	apiHandler := &api.Handler{Errors: app, Correlation: app, Notifications: app}
+	apiHandler := &api.Handler{Errors: app, Correlation: app, Notifications: app, Backups: s}
 	healthHandler := ingest.HandleHealth(app)
 
 	mux := http.NewServeMux()

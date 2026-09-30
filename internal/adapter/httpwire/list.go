@@ -2,6 +2,8 @@ package httpwire
 
 const FeatureErrorList = "error_list"
 
+const FeatureDatabaseBackup = "database_backup"
+
 // Capabilities keeps the base command contract separate from additive features.
 type Capabilities struct {
 	CommandAPI int      `json:"command_api"`

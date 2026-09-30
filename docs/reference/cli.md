@@ -73,8 +73,9 @@ arguments. Do not type the brackets.
 | `drillip silences` | List active silences. |
 | `drillip unsilence <fingerprint>` | Remove silences for the uniquely identified error. |
 | `drillip health` | Call `/-/healthy` at the configured address; print `ok` on HTTP `200`, with a two-second request deadline. |
+| `drillip backup --output <path>` | Save a complete database snapshot from the running server to a new local file. |
 
-Normal commands have a ten-second deadline covering compatibility checking and
+Investigation and state commands have a ten-second deadline covering compatibility checking and
 the operation. `health` has a two-second deadline and does not need the command
 API compatibility check. Failures never fall back to a database, follow redirects,
 or automatically retry mutations. A connection failure after submission may mean
@@ -84,6 +85,28 @@ the server already changed state; inspect the state before retrying.
 `silence` are whole numbers followed by `h`, `d`, or `w`. `correlate --nth` must
 be positive. CLI `recent --hours` accepts 1–8760. Silence output reports the expiry
 applied by the server, using the database's whole-second timestamp precision.
+
+## Save a database backup
+
+`backup --output <path>` requires a new local filename. It uses the selected
+server and checks for the `database_backup` capability. An older server reports
+an upgrade requirement before any backup download starts. Local `maintenance`
+mode does not support this command.
+
+```console
+$ drillip backup --output drillip-backup.db
+saved drillip-backup.db
+```
+
+The operation has a two-minute deadline, including the compatibility check and
+download. The server allows one backup at a time and checks the database snapshot
+before sending it. The client streams the response to a temporary file in the
+output directory. It publishes the complete file with permissions `0600`.
+It does not replace an existing file, including one created during the download.
+Failed downloads remove the temporary file and do not publish the destination.
+
+The snapshot includes all stored database data. Deployment configuration is
+separate. For restoration, see the [backup and restore guide](../how-to/backup-restore.md).
 
 ## Find error groups
 

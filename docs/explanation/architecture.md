@@ -1,8 +1,9 @@
 # Application architecture
 
 Drillip separates application behavior from the protocols, storage, and
-external services that deliver it. HTTP handlers use application services. Normal CLI commands reach those services
-through the HTTP client; explicit local maintenance uses them directly. Those services coordinate domain models through
+external services that deliver it. HTTP handlers call inbound ports. Normal CLI
+commands reach the server through the HTTP client. Explicit local maintenance
+uses application services directly. Services coordinate domain models through
 explicit port interfaces.
 
 The directories identify each part's role:
@@ -45,6 +46,13 @@ For example, the correlation service resolves a fingerprint prefix, selects
 an occurrence, and collects available telemetry. Its inbound port returns
 that combined result. The HTTP and CLI adapters then format it for their
 respective interfaces.
+
+Database backup has one inbound operation that returns a complete snapshot.
+The SQLite adapter implements this operation directly. It owns consistent reads,
+integrity checking, temporary files, and cleanup. Bootstrap connects it to the
+HTTP handler. A forwarding service would add no policy or coordination here.
+The HTTP client implements the same operation for the CLI, which publishes the
+downloaded file. Neither caller needs SQLite handles or knowledge of WAL files.
 
 ## Adapters and dependency direction
 

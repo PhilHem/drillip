@@ -9,7 +9,8 @@ such as existing host/container administration or SSH forwarding. All callers
 that can reach the endpoint have the same full API access.
 
 API responses use JSON, except for a successful health check, which returns
-plain text `ok`. Handler errors use `{"error":"message"}` with an HTTP
+plain text `ok`, and a successful backup, which returns a database file.
+Handler errors use `{"error":"message"}` with an HTTP
 error status. Paths below are relative to the running Drillip instance.
 
 Server address settings are listed in the
@@ -92,6 +93,47 @@ and increase `offset` by the number of returned errors. Requests do not share a
 snapshot; new occurrences can change the order between pages. Invalid sort,
 limit, offset, or tag syntax returns HTTP `400`.
 
+## Database backup
+
+`GET /api/0/backup/` returns a complete SQLite snapshot of the configured server
+database. It accepts no database path or filter options. It includes grouped
+errors, retained occurrences, stored context, and silences. It does not include
+deployment configuration or externally supplied credentials.
+
+The server uses SQLite's [Online Backup API](https://sqlite.org/backup.html) and
+checks the snapshot before sending any database bytes. The server stays running;
+other connections can continue writing. The snapshot represents one consistent
+point during the operation, not the state when the download finishes.
+
+A successful response has HTTP `200` and these headers:
+
+```http
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="drillip-backup.db"
+Content-Length: <database size in bytes>
+Cache-Control: no-store
+```
+
+The body is the SQLite file. `Content-Length` depends on the database size.
+The server removes its temporary snapshot after the download completes or fails.
+Snapshot creation has a one-minute deadline; the download has a two-minute write
+deadline starting when the request begins.
+
+Only one backup can run at a time, including its download. Another request returns
+HTTP `503`, with `Retry-After: 5` and:
+
+```json
+{"error":"another database backup is in progress; try again after it finishes"}
+```
+
+Snapshot creation or verification failures return HTTP `500` with an `error`
+string. Other request methods return HTTP `405`. A failure after the response
+starts can truncate the body; clients must check the download before publishing it.
+The [CLI backup command](cli.md#save-a-database-backup) does this automatically.
+
+The existing [deployment boundary](../explanation/operating-model.md#reuse-the-deployments-access-boundary)
+controls access. A downloaded backup contains the server's stored event data.
+
 ## Actions
 
 | Method | Path | Description |
@@ -168,7 +210,7 @@ a method other than POST still return HTTP `405` with an `error` string.
 `GET /api/0/capabilities/` returns:
 
 ```json
-{"command_api": 1, "features": ["error_list"]}
+{"command_api": 1, "features": ["error_list", "database_backup"]}
 ```
 
 `features` advertises additive operations. The `error_list` feature is available
@@ -177,6 +219,10 @@ The `list` client checks for this feature
 and reports an upgrade requirement if it is absent; it does not fall back to
 another query. Older version 1 servers can omit `features`. The base version
 stays at `1`, so existing clients and commands remain compatible.
+
+`database_backup` advertises the binary download contract described in
+[Database backup](#database-backup). It is additive and leaves command API version
+1 unchanged.
 
 Version 1 promises:
 
@@ -333,6 +379,7 @@ Error bodies have the form `{"error":"message"}`.
 | `silence` | `400` for an invalid fingerprint or duration; `404` for an unknown reference; `409` for ambiguity; `405` for a method other than POST or DELETE; `500` for a storage failure. |
 | `test-email` | `405` for a method other than POST; `502` for an SMTP send failure; `503` when notifications are not configured. |
 | Health | `503` when the database check fails. The health handler does not restrict the HTTP method. |
+| Backup | `405` for a method other than GET; `503` when another backup is in progress or backups are unavailable; `500` for snapshot creation or verification failure. |
 
 Some invalid query values are accepted with defaults instead of an error:
 `hours` and `nth` follow the rules under [Query](#query), and a malformed

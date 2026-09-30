@@ -56,6 +56,7 @@ Commands:
   unsilence    Remove an error group's notification silence
   gc           Delete occurrences older than a duration
   health       Check server health
+  backup       Save a consistent backup of the server database
   serve        Run the server (default command)
   maintenance  Run a command against an existing local database
 
@@ -128,6 +129,9 @@ Use drillip COMMAND --help for command options.
 		if local.Arg(0) == "health" {
 			return fmt.Errorf("health checks a server and is unavailable in maintenance")
 		}
+		if local.Arg(0) == "backup" {
+			return fmt.Errorf("backup uses server access; use drillip backup --output PATH")
+		}
 		if *db == "" {
 			return fmt.Errorf("maintenance requires an explicit --db PATH")
 		}
@@ -180,7 +184,7 @@ Use drillip COMMAND --help for command options.
 			_, err = fmt.Fprintln(stdout, "ok")
 			return err
 		}
-		return cmd.Run(ctx, &cli.CLI{Errors: client, Correlation: client,
+		return cmd.Run(ctx, &cli.CLI{Errors: client, Correlation: client, Backups: client,
 			CommandPrefix: []string{"drillip", "--server", target}}, stdout)
 	}
 }
