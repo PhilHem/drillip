@@ -101,6 +101,10 @@ func TestTestEmailDisabledDiagnostics(t *testing.T) {
 				t.Errorf("hint missing %s: %v", setting, body)
 			}
 		}
+		if !strings.Contains(body["hint"], "For Docker, recreate the container") ||
+			!strings.Contains(body["hint"], "otherwise restart the Drillip server") {
+			t.Errorf("hint must distinguish Docker recreation from a server restart: %s", body["hint"])
+		}
 	}
 }
 
