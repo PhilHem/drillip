@@ -17,6 +17,7 @@ type Command struct {
 	name, reference, reason, durationText string
 	limit, hours, nth                     int
 	filter                                domain.ListFilter
+	listQuery                             domain.ListQuery
 	duration                              time.Duration
 }
 
@@ -39,11 +40,24 @@ func Parse(args []string, help io.Writer) (*Command, error) {
 			fmt.Fprint(&usage, " <duration>")
 		}
 		fmt.Fprintln(&usage)
+		switch cmd.name {
+		case "list":
+			fmt.Fprintln(&usage, "Browse resolved and unresolved error groups, newest last-seen first by default.")
+		case "top":
+			fmt.Fprintln(&usage, "Show error groups ranked by total occurrence count.")
+		case "recent":
+			fmt.Fprintln(&usage, "Show error groups first seen within the lookback window.")
+		}
 		fs.SetOutput(&usage)
 		fs.PrintDefaults()
 	}
 	var tag string
 	switch cmd.name {
+	case "list":
+		fs.StringVar(&cmd.listQuery.Search, "search", "", "literal substring in full stored type or message (ASCII case-insensitive)")
+		fs.StringVar(&cmd.listQuery.Sort, "sort", domain.SortLastSeen, "order by last_seen or count, descending")
+		fs.IntVar(&cmd.listQuery.Limit, "limit", domain.DefaultListLimit, fmt.Sprintf("number of errors to show (1–%d)", domain.MaxListLimit))
+		fs.IntVar(&cmd.listQuery.Offset, "offset", 0, "number of matching errors to skip")
 	case "top":
 		fs.IntVar(&cmd.limit, "limit", 10, "number of errors to show")
 	case "recent":
@@ -56,7 +70,7 @@ func Parse(args []string, help io.Writer) (*Command, error) {
 	default:
 		return nil, fmt.Errorf("unknown command: %s", cmd.name)
 	}
-	if cmd.name == "top" || cmd.name == "recent" {
+	if cmd.name == "list" || cmd.name == "top" || cmd.name == "recent" {
 		fs.StringVar(&cmd.filter.Level, "level", "", "filter by level")
 		fs.StringVar(&tag, "tag", "", "filter by key=value")
 	}
@@ -87,6 +101,15 @@ func Parse(args []string, help io.Writer) (*Command, error) {
 		}
 		cmd.filter.TagKey, cmd.filter.TagVal = k, v
 	}
+	if cmd.name == "list" {
+		cmd.listQuery.Filter = cmd.filter
+		if err := cmd.listQuery.Validate(); err != nil {
+			return nil, err
+		}
+		if cmd.listQuery.Sort == "" {
+			cmd.listQuery.Sort = domain.SortLastSeen
+		}
+	}
 	if len(positional) > 0 && cmd.name != "gc" {
 		cmd.reference = positional[0]
 		if !domain.ValidFingerprint(cmd.reference) {
@@ -110,6 +133,8 @@ func Parse(args []string, help io.Writer) (*Command, error) {
 
 func (c *Command) Run(ctx context.Context, backend *CLI, w io.Writer) error {
 	switch c.name {
+	case "list":
+		return backend.runList(ctx, c, w)
 	case "top":
 		return backend.runTop(ctx, c, w)
 	case "recent":

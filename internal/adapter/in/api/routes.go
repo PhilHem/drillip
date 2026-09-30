@@ -1,6 +1,10 @@
 package api
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/PhilHem/drillip/internal/adapter/httpwire"
+)
 
 // Routes exposes the JSON command API, including its compatibility contract.
 func (h *Handler) Routes() http.Handler {
@@ -10,8 +14,9 @@ func (h *Handler) Routes() http.Handler {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
-		writeJSON(w, map[string]int{"command_api": 1})
+		writeJSON(w, httpwire.Capabilities{CommandAPI: 1, Features: []string{httpwire.FeatureErrorList}})
 	})
+	mux.HandleFunc("/api/0/list/", h.HandleList)
 	mux.HandleFunc("/api/0/top/", h.HandleTop)
 	mux.HandleFunc("/api/0/recent/", h.HandleRecent)
 	mux.HandleFunc("/api/0/show/", h.HandleShow)

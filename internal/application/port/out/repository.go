@@ -15,6 +15,7 @@ type EventStore interface {
 
 // QueryStore loads error investigation data.
 type QueryStore interface {
+	List(domain.ListQuery) (domain.ErrorPage, error)
 	ListTop(domain.ListFilter, int) ([]domain.ErrorSummary, error)
 	ListRecent(domain.ListFilter, time.Time) ([]domain.ErrorSummary, error)
 	FindByPrefix(string) (string, error)

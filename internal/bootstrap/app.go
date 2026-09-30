@@ -37,6 +37,31 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	legacyAddr := fs.String("addr", "", "deprecated: use --server URL or serve --listen address")
 	legacyDB := fs.String("db", "", "deprecated global server DB option; use serve --db or maintenance --db")
 	offline := fs.Bool("offline", false, "removed: use maintenance --db PATH COMMAND")
+	globalUsage := fs.Usage
+	fs.Usage = func() {
+		globalUsage()
+		fmt.Fprint(stderr, `
+Commands:
+  list         Browse and search all error groups with pagination
+  top          Rank error groups by total occurrence count
+  recent       Show error groups first seen within a lookback window
+  show         Inspect an error group
+  trend        Show an error group's hourly occurrences
+  releases     Show an error group's occurrences by release
+  correlate    Inspect telemetry around an error occurrence
+  stats        Show error and occurrence totals
+  resolve      Mark an error group resolved
+  silence      Silence notifications for an error group
+  silences     List active notification silences
+  unsilence    Remove an error group's notification silence
+  gc           Delete occurrences older than a duration
+  health       Check server health
+  serve        Run the server (default command)
+  maintenance  Run a command against an existing local database
+
+Use drillip COMMAND --help for command options.
+`)
+	}
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -122,7 +147,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		defer s.Close()
 		app := service.New(s, nil, nil)
-		return cmd.Run(ctx, &cli.CLI{Errors: app, Correlation: app}, stdout)
+		return cmd.Run(ctx, &cli.CLI{Errors: app, Correlation: app,
+			CommandPrefix: []string{"drillip", "maintenance", "--db", *db}}, stdout)
 	default:
 		cmd, err := cli.Parse(append([]string{mode}, rest...), stdout)
 		if err != nil {
@@ -154,7 +180,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			_, err = fmt.Fprintln(stdout, "ok")
 			return err
 		}
-		return cmd.Run(ctx, &cli.CLI{Errors: client, Correlation: client}, stdout)
+		return cmd.Run(ctx, &cli.CLI{Errors: client, Correlation: client,
+			CommandPrefix: []string{"drillip", "--server", target}}, stdout)
 	}
 }
 
