@@ -14,9 +14,14 @@ func (h *Handler) Routes() http.Handler {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
-		writeJSON(w, httpwire.Capabilities{CommandAPI: 1, Features: []string{httpwire.FeatureErrorList}})
+		features := []string{httpwire.FeatureErrorList}
+		if h.Backups != nil {
+			features = append(features, httpwire.FeatureDatabaseBackup)
+		}
+		writeJSON(w, httpwire.Capabilities{CommandAPI: 1, Features: features})
 	})
 	mux.HandleFunc("/api/0/list/", h.HandleList)
+	mux.HandleFunc("/api/0/backup/", h.HandleBackup)
 	mux.HandleFunc("/api/0/top/", h.HandleTop)
 	mux.HandleFunc("/api/0/recent/", h.HandleRecent)
 	mux.HandleFunc("/api/0/show/", h.HandleShow)

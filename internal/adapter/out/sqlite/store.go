@@ -12,7 +12,8 @@ import (
 
 // Store wraps the SQLite database connection.
 type Store struct {
-	db *sql.DB
+	db         *sql.DB
+	backupGate chan struct{}
 }
 
 // RawDB returns the underlying *sql.DB.
@@ -87,7 +88,7 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 
-	s := &Store{db: sqlDB}
+	s := &Store{db: sqlDB, backupGate: make(chan struct{}, 1)}
 	if err := s.migrateDB(); err != nil {
 		sqlDB.Close()
 		return nil, err
