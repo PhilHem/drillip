@@ -49,6 +49,15 @@ inputs. Reports from different releases or environments can therefore belong
 to the same error in a Drillip database. Grouping identifies matching reports;
 it does not prove that they share one root cause.
 
+### Custom SDK fingerprints
+
+Sentry supports [custom SDK fingerprints](https://docs.sentry.io/platforms/python/usage/sdk-fingerprinting/)
+as arrays of strings, for example Python's `scope.fingerprint`. Drillip ignores
+this event field and always computes its own fingerprint from the inputs above.
+Two otherwise identical message events with `fingerprint: ["checkout"]` and
+`fingerprint: ["billing"]` therefore belong to the same Drillip group. Conversely,
+giving different grouping inputs the same custom array does not merge their groups.
+
 ## State describes the grouped error
 
 Drillip derives the displayed state when you query an error:
