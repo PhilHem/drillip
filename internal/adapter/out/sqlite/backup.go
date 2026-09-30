@@ -43,11 +43,15 @@ func (s *Store) Backup(ctx context.Context) (_ domain.DatabaseBackup, err error)
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	path := filepath.Join(dir, "backup.db")
-	if err := s.copyDatabase(ctx, path); err != nil {
+	snapshotAt, err := s.copyDatabase(ctx, path)
+	if err != nil {
 		return nil, fmt.Errorf("create database snapshot: %w", err)
 	}
 	if err := os.Chmod(path, 0600); err != nil {
 		return nil, err
+	}
+	if err := stampSnapshot(ctx, path, snapshotAt); err != nil {
+		return nil, fmt.Errorf("record backup snapshot: %w", err)
 	}
 	if err := checkBackup(ctx, path); err != nil {
 		return nil, err
@@ -61,28 +65,33 @@ func (s *Store) Backup(ctx context.Context) (_ domain.DatabaseBackup, err error)
 		_ = file.Close()
 		return nil, err
 	}
+	if _, err := s.db.ExecContext(ctx, "INSERT OR REPLACE INTO drillip_metadata VALUES ('last_backup_generated_at', ?)", time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("record generated backup: %w", err)
+	}
 	complete = true
 	return &databaseBackup{File: file, size: info.Size(), dir: dir, gate: s.backupGate}, nil
 }
 
-func (s *Store) copyDatabase(ctx context.Context, path string) error {
+func (s *Store) copyDatabase(ctx context.Context, path string) (time.Time, error) {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
-		return err
+		return time.Time{}, err
 	}
 	defer conn.Close()
 	// Pin a WAL read snapshot. Other connections can keep committing writes,
 	// without restarting an incremental backup on every new commit.
 	tx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
-		return err
+		return time.Time{}, err
 	}
 	defer tx.Rollback()
 	var tables int
 	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_schema").Scan(&tables); err != nil {
-		return err
+		return time.Time{}, err
 	}
-	return conn.Raw(func(raw any) (err error) {
+	snapshotAt := time.Now().UTC()
+	return snapshotAt, conn.Raw(func(raw any) (err error) {
 		backuper, ok := raw.(interface {
 			NewBackup(string) (*driver.Backup, error)
 		})

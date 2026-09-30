@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -31,6 +32,10 @@ func Open(path string) (*Store, error) {
 
 	sqlDB.SetMaxOpenConns(2) // SQLite WAL allows 1 writer + concurrent readers, keep pool small
 	sqlDB.SetMaxIdleConns(2)
+	if err := checkBackupFormat(context.Background(), sqlDB); err != nil {
+		sqlDB.Close()
+		return nil, err
+	}
 
 	_, err = sqlDB.Exec(`
 		PRAGMA journal_mode=WAL;
@@ -90,6 +95,10 @@ func Open(path string) (*Store, error) {
 
 	s := &Store{db: sqlDB, backupGate: make(chan struct{}, 1)}
 	if err := s.migrateDB(); err != nil {
+		sqlDB.Close()
+		return nil, err
+	}
+	if _, err := sqlDB.Exec(metadataSchema); err != nil {
 		sqlDB.Close()
 		return nil, err
 	}

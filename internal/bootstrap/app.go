@@ -57,6 +57,7 @@ Commands:
   gc           Delete occurrences older than a duration
   health       Check server health
   backup       Save a consistent backup of the server database
+  restore      Restore a checked backup into a new local database
   serve        Run the server (default command)
   maintenance  Run a command against an existing local database
 
@@ -88,6 +89,24 @@ Use drillip COMMAND --help for command options.
 		return fmt.Errorf("use --server or legacy --addr, not both")
 	}
 	switch mode {
+	case "restore":
+		if *server != "" || *legacyAddr != "" || *legacyDB != "" {
+			return fmt.Errorf("restore uses local files; use restore --input PATH --db PATH")
+		}
+		restore := flags("drillip restore", stderr)
+		input := restore.String("input", "", "required standalone Drillip backup file")
+		db := restore.String("db", os.Getenv("DRILLIP_DB"), "new destination database path; defaults to DRILLIP_DB")
+		if err := restore.Parse(rest); err != nil {
+			return err
+		}
+		if restore.NArg() != 0 || *input == "" || *db == "" {
+			return fmt.Errorf("restore requires --input PATH and a new --db PATH (or DRILLIP_DB)")
+		}
+		if err := store.Restore(ctx, *input, *db); err != nil {
+			return err
+		}
+		_, err := fmt.Fprintf(stdout, "restored %s\n", *db)
+		return err
 	case "serve":
 		if *server != "" {
 			return fmt.Errorf("--server selects a client target; use serve --listen")
