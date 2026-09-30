@@ -98,14 +98,28 @@ For resolution summaries and other notification triggers, see the
 
 ## If the test fails
 
+Read the response body. When it includes a `hint`, follow that instruction. For
+example, a rejected SMTP login returns HTTP `502` with this diagnosis:
+
+```json
+{
+  "error": "The SMTP server rejected authentication.",
+  "code": "smtp_auth_rejected",
+  "hint": "Check DRILLIP_SMTP_USER, DRILLIP_SMTP_PASS, and the provider's authentication requirements."
+}
+```
+
+`code` identifies the problem; `hint` gives the next check. Connection failures,
+timeouts, certificate errors, and rejected addresses have their own diagnoses.
+See the [test-email error reference](../reference/http-api.md#test-email-errors)
+for the codes. An older server can return only `error`; use that text and the
+server logs to identify the failed step.
+
 | Result | Check |
 |---|---|
 | `curl` cannot connect to Drillip | Check the instance URL, published port, and whether the server is running. |
 | HTTP `503`, `notifications not configured` | Set both `DRILLIP_SMTP_HOST` and `DRILLIP_SMTP_TO` in the server environment, then apply the configuration again. |
-| HTTP `502`, `send failed: ...` with a DNS or connection error | Check the SMTP hostname, port, and network access from the Drillip process or container. Container `localhost` refers to that container. |
-| HTTP `502` with an authentication error | Check the username, password or app password, and the provider's supported authentication methods. Drillip uses SMTP PLAIN authentication when a username is set. |
-| HTTP `502` with a TLS or certificate error | Check the STARTTLS endpoint and certificate hostname. For a private CA, provide a trusted CA bundle as described above. |
-| HTTP `502` with a sender or recipient rejection | Check that the SMTP account can send from `DRILLIP_SMTP_FROM` and deliver to `DRILLIP_SMTP_TO`. |
+| HTTP `502` | Follow the response's `hint`. For additional details, check the Drillip server logs. |
 | HTTP `200`, but no email arrives | Check spam folders, the recipient address, and the SMTP provider's delivery logs. |
 
 After correcting the configuration, apply it again and repeat the test request.
