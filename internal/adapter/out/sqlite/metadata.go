@@ -19,6 +19,10 @@ INSERT OR IGNORE INTO drillip_metadata VALUES ('backup_format_version', '1');`
 func openDatabaseFile(path, mode string) (*sql.DB, error) {
 	query := url.Values{"mode": {mode}, "_pragma": {"busy_timeout(5000)"}}
 	u := url.URL{Scheme: "file", Path: path, RawQuery: query.Encode()}
+	if path == ":memory:" {
+		query.Set("mode", "memory")
+		u = url.URL{Scheme: "file", Opaque: ":memory:", RawQuery: query.Encode()}
+	}
 	db, err := sql.Open("sqlite", u.String())
 	if err == nil {
 		db.SetMaxOpenConns(1)
