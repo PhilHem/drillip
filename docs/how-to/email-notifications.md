@@ -4,15 +4,16 @@ Use this guide to enable email notifications on an existing Drillip instance.
 You need access to its configuration, an SMTP server reachable from Drillip,
 a sender address, a recipient mailbox, and `curl`.
 
+The diagnostic response examples below require Drillip v0.3.18 or later.
+
 Have the SMTP host, port, and any required login credentials ready. Drillip
 uses SMTP with STARTTLS when the server offers it. Use your provider's
 STARTTLS endpoint, not an implicit-TLS endpoint such as port 465.
 
-Docker images from v0.3.15 include a public CA bundle for TLS
-certificate verification. The `v0.3.14` image used in the run guide does not
-include it. For that image, mount a trusted PEM CA bundle read-only and set
-`SSL_CERT_FILE` to its path inside the container. This also supports an SMTP
-server that uses a private CA. Add these options before the image name:
+The Docker image used in the [run guide](run-drillip.md#docker) includes a public
+CA bundle for TLS certificate verification. If your SMTP server uses a private
+CA, mount a trusted PEM CA bundle read-only and set `SSL_CERT_FILE` to its path
+inside the container. Add these options before the image name:
 
 ```sh
 --mount type=bind,source=/absolute/path/smtp-ca-bundle.pem,target=/certs/ca-bundle.pem,readonly \
@@ -113,8 +114,9 @@ example, a rejected SMTP login returns HTTP `502` with this diagnosis:
 `code` identifies the problem; `hint` gives the next check. Connection failures,
 timeouts, certificate errors, and rejected addresses have their own diagnoses.
 See the [test-email error reference](../reference/http-api.md#test-email-errors)
-for the codes. An older server can return only `error`; use that text and the
-server logs to identify the failed step.
+for the codes. Servers through v0.3.17 return only `error`; use the
+[v0.3.17 troubleshooting instructions](https://github.com/PhilHem/drillip/blob/v0.3.17/docs/how-to/email-notifications.md#if-the-test-fails)
+for their SMTP checks, or update the server to get the diagnoses shown here.
 
 | Result | Check |
 |---|---|

@@ -1,8 +1,7 @@
 # HTTP API reference
 
 This describes the current checkout. Command API version 1 and absolute-time
-parameters are available from v0.3.15 and require a matching server build; the
-pinned v0.3.14 examples use the older relative-parameter API.
+parameters are available from v0.3.15 and require a matching server build.
 
 The API deliberately has no separate credentials or roles. Access control belongs
 to the [deployment boundary](../explanation/operating-model.md#reuse-the-deployments-access-boundary),
@@ -121,6 +120,9 @@ notifications are not configured, and HTTP `502` when sending fails. See the
 
 ### Test-email errors
 
+The `code` and `hint` fields are available from v0.3.18. Servers through
+v0.3.17 return only `error`.
+
 Delivery and configuration failures include three string fields: `error` is a
 human-readable diagnosis, `code` is its stable identifier, and `hint` suggests
 the next check. For example, a rejected SMTP login returns HTTP `502`:
@@ -169,8 +171,9 @@ a method other than POST still return HTTP `405` with an `error` string.
 {"command_api": 1, "features": ["error_list"]}
 ```
 
-`features` advertises additive operations. `error_list` promises the search and
-pagination contract of `/api/0/list/`. The `list` client checks for this feature
+`features` advertises additive operations. The `error_list` feature is available
+from v0.3.17. It promises the search and pagination contract of `/api/0/list/`.
+The `list` client checks for this feature
 and reports an upgrade requirement if it is absent; it does not fall back to
 another query. Older version 1 servers can omit `features`. The base version
 stays at `1`, so existing clients and commands remain compatible.

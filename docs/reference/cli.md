@@ -1,7 +1,7 @@
 # CLI reference
 
 This describes the current checkout, including command API version 1 introduced
-in v0.3.15. The pinned v0.3.14 image has older CLI behavior. See
+in v0.3.15. See
 [the migration procedure](../how-to/upgrade-cli.md) to build a matching
 client/server pair and verify the switch.
 
@@ -120,7 +120,8 @@ Repeat the search from the first page if new activity changes the results.
 `recent` selects groups by their **first** occurrence, so an older group that
 occurs again can appear first in `list` without appearing in `recent`.
 
-The server must advertise the `error_list` feature in its
+`list` is available from v0.3.17. The server must advertise the `error_list`
+feature in its
 [capabilities response](http-api.md#command-api-compatibility-and-exact-times).
 If it does not, `list` asks you to upgrade the server. Existing commands continue
 to work with command API version 1 servers that do not offer this feature.
@@ -164,10 +165,6 @@ API endpoints and duration parameters.
 server-start option and is rejected for normal commands. `DRILLIP_DB` does not
 select local command execution. New normal commands require a running server;
 use maintenance for deliberate local access.
-
-The Python tutorial remains pinned to v0.3.14 and therefore retains that release's
-CLI semantics. Build its example with a current Drillip image to exercise this
-contract; see [the tutorial](../tutorials/python-container.md#build-and-start-the-service).
 
 ## Fingerprints
 
