@@ -48,3 +48,5 @@ Use `/api/0/top/` to find an existing group whose count increased instead.
 See the [HTTP API reference](../reference/http-api.md#query) for the query
 endpoints, and the [lifecycle explanation](../explanation/error-lifecycle.md)
 for how reports are grouped.
+
+Once an error has arrived, [find, investigate, and resolve its group](investigate-error.md).
