@@ -59,6 +59,7 @@ arguments. Do not type the brackets.
 | Syntax | Effect |
 |---|---|
 | `drillip serve` | Start the HTTP server and background maintenance. |
+| `drillip list [options]` | Find error groups by last occurrence, text, or tags; see [list options](#find-error-groups). |
 | `drillip top [--level <level>] [--tag <key=value>] [--limit <n>]` | List errors by total occurrence count; default limit `10`; must be positive. |
 | `drillip recent [--hours <n>] [--level <level>] [--tag <key=value>]` | List errors first seen within the last N hours; default `1`, range `1–8760`. |
 | `drillip show <fingerprint>` | Show error details, stacktrace, and tag distribution. |
@@ -83,6 +84,46 @@ the server already changed state; inspect the state before retrying.
 `silence` are whole numbers followed by `h`, `d`, or `w`. `correlate --nth` must
 be positive. CLI `recent --hours` accepts 1–8760. Silence output reports the expiry
 applied by the server, using the database's whole-second timestamp precision.
+
+## Find error groups
+
+Use `list` to find a reported error. By default, it shows up to 50 groups,
+most recently seen first, including resolved groups:
+
+```sh
+drillip list
+drillip list --search "payment gateway"
+drillip list --sort count
+```
+
+| Option | Effect |
+|---|---|
+| `--search <text>` | Match a literal substring in the complete stored exception type or message. ASCII letter case is ignored; other characters match exactly. `%` and `_` are literal characters. |
+| `--sort last_seen` | Most recent occurrence first; the default. Equal timestamps are ordered by fingerprint ascending. |
+| `--sort count` | Highest total occurrence count first, then last occurrence descending and fingerprint ascending. |
+| `--level <level>` | Filter by severity. |
+| `--tag <key=value>` | Filter by the group's stored tag, for example `service=checkout`. Tags come from the event that created the group. |
+| `--limit <n>` | Page size, from `1` to `500`; default `50`. |
+| `--offset <n>` | Skip this many matching groups; default `0`. Must not be negative. |
+
+Search and filters apply on the server before the page is selected. Search uses
+the group's stored type and message, including text beyond the list's shortened
+`VALUE` column. It does not search a separate message history for each occurrence.
+Use `show` with a result's full fingerprint to read its details.
+
+When more matches exist, the output includes a next-page command that preserves
+the server or maintenance database, search, filters, sort order, and page size.
+Pages are separate queries: incoming errors can change their order between calls.
+Repeat the search from the first page if new activity changes the results.
+
+`top` remains the historical frequency ranking with a default limit of 10.
+`recent` selects groups by their **first** occurrence, so an older group that
+occurs again can appear first in `list` without appearing in `recent`.
+
+The server must advertise the `error_list` feature in its
+[capabilities response](http-api.md#command-api-compatibility-and-exact-times).
+If it does not, `list` asks you to upgrade the server. Existing commands continue
+to work with command API version 1 servers that do not offer this feature.
 
 ## Local maintenance
 

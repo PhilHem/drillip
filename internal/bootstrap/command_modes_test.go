@@ -60,6 +60,7 @@ func TestEveryNormalCommandUsesServer(t *testing.T) {
 		args []string
 		want string
 	}{
+		{[]string{"list", "--search", "COMMAND-mode", "--tag", "key=a&b+c"}, fp},
 		{[]string{"top", "--limit", "1"}, fp}, {[]string{"recent", "--tag", "key=a&b+c"}, fp},
 		{[]string{"show", fp}, event.Fingerprint}, {[]string{"trend", fp}, "Trend"}, {[]string{"releases", fp}, "v1"},
 		{[]string{"correlate", fp}, "server-owned diagnostic"}, {[]string{"stats"}, "Unique errors:      1"},
@@ -82,9 +83,11 @@ func TestHelpAndInvalidInputNeverAccessBackend(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "never-created.db")
 	t.Setenv("DRILLIP_DB", db)
 	for _, args := range [][]string{
-		{"--help"}, {"serve", "--help"}, {"maintenance", "--help"}, {"show", "--help"}, {"top", "--help"}, {"health", "--help"},
+		{"--help"}, {"serve", "--help"}, {"maintenance", "--help"}, {"show", "--help"}, {"top", "--help"}, {"health", "--help"}, {"list", "--help"},
+		{"list", "--limit", "0"}, {"list", "--limit", "501"}, {"list", "--offset", "-1"}, {"list", "--sort", "invalid"}, {"list", "--tag", "invalid"},
 		{"unknown"}, {"show"}, {"show", "bad!"}, {"show", "abcd", "extra"}, {"top", "--limit", "0"}, {"recent", "--hours", "-1"}, {"silence", "abcd", "bad-duration"}, {"gc", "nonsense"}, {"stats", "unexpected"}, {"health", "unexpected"},
 		{"maintenance", "--db", db, "show", "--help"}, {"maintenance", "--db", db, "show", "bad!"}, {"maintenance", "--db", db, "top", "--limit", "0"},
+		{"maintenance", "--db", db, "list", "--help"}, {"maintenance", "--db", db, "list", "--limit", "501"},
 	} {
 		var out, errout bytes.Buffer
 		_ = Run(context.Background(), args, &out, &errout)

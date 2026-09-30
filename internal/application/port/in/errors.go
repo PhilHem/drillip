@@ -12,6 +12,7 @@ import (
 // a full fingerprint or unique prefix; unknown, invalid, and ambiguous references
 // fail before the view is queried. Results carry the canonical fingerprint.
 type Queries interface {
+	List(context.Context, domain.ListQuery) (domain.ErrorPage, error)
 	ListTop(context.Context, domain.ListFilter, int) ([]domain.ErrorSummary, error)
 	ListRecent(context.Context, domain.ListFilter, time.Time) ([]domain.ErrorSummary, error)
 	GetDetail(context.Context, string) (*domain.ErrorDetail, error)
