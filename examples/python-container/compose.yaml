@@ -5,7 +5,7 @@ services:
     build:
       context: .
       args:
-        DRILLIP_IMAGE: ${DRILLIP_IMAGE:-ghcr.io/philhem/drillip:v0.3.14}
+        DRILLIP_IMAGE: ${DRILLIP_IMAGE:-ghcr.io/philhem/drillip:v0.3.16}
     platform: linux/amd64
     ports:
       - "127.0.0.1:${APP_PORT:-18000}:8000"

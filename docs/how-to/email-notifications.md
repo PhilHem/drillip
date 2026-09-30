@@ -8,11 +8,10 @@ Have the SMTP host, port, and any required login credentials ready. Drillip
 uses SMTP with STARTTLS when the server offers it. Use your provider's
 STARTTLS endpoint, not an implicit-TLS endpoint such as port 465.
 
-Docker images from v0.3.15 include a public CA bundle for TLS
-certificate verification. The `v0.3.14` image used in the run guide does not
-include it. For that image, mount a trusted PEM CA bundle read-only and set
-`SSL_CERT_FILE` to its path inside the container. This also supports an SMTP
-server that uses a private CA. Add these options before the image name:
+The Docker image used in the [run guide](run-drillip.md#docker) includes a public
+CA bundle for TLS certificate verification. If your SMTP server uses a private
+CA, mount a trusted PEM CA bundle read-only and set `SSL_CERT_FILE` to its path
+inside the container. Add these options before the image name:
 
 ```sh
 --mount type=bind,source=/absolute/path/smtp-ca-bundle.pem,target=/certs/ca-bundle.pem,readonly \
@@ -105,7 +104,7 @@ For resolution summaries and other notification triggers, see the
 | HTTP `503`, `notifications not configured` | Set both `DRILLIP_SMTP_HOST` and `DRILLIP_SMTP_TO` in the server environment, then apply the configuration again. |
 | HTTP `502`, `send failed: ...` with a DNS or connection error | Check the SMTP hostname, port, and network access from the Drillip process or container. Container `localhost` refers to that container. |
 | HTTP `502` with an authentication error | Check the username, password or app password, and the provider's supported authentication methods. Drillip uses SMTP PLAIN authentication when a username is set. |
-| HTTP `502` with a TLS or certificate error | Check the STARTTLS endpoint and certificate hostname. For a private CA or the older `v0.3.14` image, provide a trusted CA bundle as described above. |
+| HTTP `502` with a TLS or certificate error | Check the STARTTLS endpoint and certificate hostname. For a private CA, provide a trusted CA bundle as described above. |
 | HTTP `502` with a sender or recipient rejection | Check that the SMTP account can send from `DRILLIP_SMTP_FROM` and deliver to `DRILLIP_SMTP_TO`. |
 | HTTP `200`, but no email arrives | Check spam folders, the recipient address, and the SMTP provider's delivery logs. |
 

@@ -1,8 +1,7 @@
 # HTTP API reference
 
 This describes the current checkout. Command API version 1 and absolute-time
-parameters are available from v0.3.15 and require a matching server build; the
-pinned v0.3.14 examples use the older relative-parameter API.
+parameters are available from v0.3.15 and require a matching server build.
 
 The API deliberately has no separate credentials or roles. Access control belongs
 to the [deployment boundary](../explanation/operating-model.md#reuse-the-deployments-access-boundary),
