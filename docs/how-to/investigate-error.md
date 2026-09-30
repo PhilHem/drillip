@@ -19,7 +19,13 @@ export DRILLIP_SERVER=http://127.0.0.1:8300
 drillip health
 ```
 
-Expect `ok`. To update an older server, follow the [CLI upgrade guide](upgrade-cli.md).
+Expected output:
+
+```text
+ok
+```
+
+To update an older server, follow the [CLI upgrade guide](upgrade-cli.md).
 For a remote server, you can use an [SSH tunnel](upgrade-cli.md#2-select-and-check-the-server).
 
 ## 1. Find the error group
@@ -82,12 +88,23 @@ Apply and verify the application fix, then mark this group resolved:
 
 ```sh
 drillip resolve "$fingerprint"
+```
+
+Expected output, using the example fingerprint:
+
+```text
+resolved c2a8398a3347b02d
+```
+
+The fingerprint in the output matches the group you selected. Check its state:
+
+```sh
 drillip top --limit 50
 ```
 
-Expect `resolved` followed by the full fingerprint. Its row now shows the state
-`resolved`; increase the list limit if needed. Resolution can send an email
-according to the server's configuration. It preserves the group's history and
+Its row now shows the state `resolved`; increase the list limit if needed.
+Resolution can send an email according to the server's configuration.
+It preserves the group's history and
 does not itself fix the application. A later matching event reopens the group
 as a [regression](../explanation/error-lifecycle.md#resolution-and-regression).
 
