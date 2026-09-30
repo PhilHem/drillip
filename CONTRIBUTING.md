@@ -5,8 +5,8 @@ source layout, port responsibilities, and dependency rules.
 
 ## Build from a checkout
 
-Use the Go version declared in [go.mod](go.mod), currently Go 1.26. Run the
-commands below from the repository root:
+Install the Go version specified in [go.mod](go.mod), currently Go 1.26.
+Run the commands below from the repository root:
 
 ```sh
 go build .
@@ -17,6 +17,13 @@ the current checkout into your Go binary directory, use:
 
 ```sh
 go install .
+```
+
+Add the directory that contains the installed `drillip` executable to your
+shell's `PATH`. Confirm that the shell can find the command:
+
+```sh
+drillip --help
 ```
 
 ## Check a change
