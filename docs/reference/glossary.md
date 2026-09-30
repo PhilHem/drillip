@@ -52,3 +52,15 @@ It is neither confirmation that Drillip stored the event nor the fingerprint
 used to look up its error group.
 See the [Python tutorial](../tutorials/python-container.md#capture-an-exception)
 for an example showing both identifiers.
+
+## Tag
+
+A name-value pair included in an [event](#event) to describe its context.
+For example, an application can send `"tags": {"service": "checkout"}` to label
+the reporting service. In the CLI, write this pair as `service=checkout`.
+Tags are optional. `top --tag` and `recent --tag` filter by the tags stored when
+the group was first created. `drillip show` displays them in its `Tags` section;
+its `Tag Distribution` section summarizes tags across retained occurrences. See
+[the investigation guide](../how-to/investigate-error.md#1-find-the-error-group)
+for an example. The event's `environment` and `release` fields are separate
+from its tags.

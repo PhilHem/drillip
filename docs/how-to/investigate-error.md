@@ -29,8 +29,26 @@ and error details will differ. `...` marks omitted output.
 
 ## 1. Find the error group
 
-If you know a tag that the application sends, use it to narrow the list.
-Replace `service=checkout` with your actual tag:
+List the recorded error groups:
+
+```console
+$ drillip top --limit 50
+FINGERPRINT       COUNT  LEVEL  STATE  TYPE          VALUE                                             LAST SEEN
+────────────────  ─────  ─────  ─────  ────────────  ────────────────────────────────────────────────  ─────────
+def8ed90f15e01eb  3      error  new    TimeoutError  Payment gateway did not respond within 3 seconds  1s ago
+b6276ba72bbc5084  1      error  new    ValueError    Invoice total must be positive                    0s ago
+
+→ drillip show <fingerprint>
+```
+
+Look for the exception type or message in the `TYPE` and `VALUE` columns.
+The list orders groups by their total count. Increase `--limit` if the group
+is not in the first results.
+Long messages are shortened; use `show` below to read the full message.
+
+You can optionally narrow the list with a [tag](../reference/glossary.md#tag):
+a name-value pair that the application sends with an error report. For example,
+`service=checkout` labels the reporting service as `checkout`:
 
 ```console
 $ drillip top --tag service=checkout --limit 50
@@ -41,11 +59,8 @@ def8ed90f15e01eb  3      error  new    TimeoutError  Payment gateway did not res
 → drillip show <fingerprint>
 ```
 
-Look for the exception type or message in the `TYPE` and `VALUE` columns.
-If you do not know a tag, or the filtered list has no matching group, run
-`drillip top --limit 50` to search without a tag filter. The list orders groups
-by their total count. Increase `--limit` if the group is not in the first results.
-Long messages are shortened; use `show` below to read the full message.
+Use a tag sent by your application. If you do not know one, continue with the
+unfiltered list. The `Tags` section of `show` below displays the group's stored tags.
 
 For an error that first appeared recently, you can instead use:
 
