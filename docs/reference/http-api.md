@@ -120,6 +120,9 @@ notifications are not configured, and HTTP `502` when sending fails. See the
 
 ### Test-email errors
 
+The `code` and `hint` fields are available from v0.3.18. Servers through
+v0.3.17 return only `error`.
+
 Delivery and configuration failures include three string fields: `error` is a
 human-readable diagnosis, `code` is its stable identifier, and `hint` suggests
 the next check. For example, a rejected SMTP login returns HTTP `502`:

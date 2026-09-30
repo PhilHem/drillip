@@ -13,7 +13,7 @@ jobs:
       matrix:
         drillip: [released, checkout]
     env:
-      DRILLIP_IMAGE: ${{ matrix.drillip == 'checkout' && 'drillip:ci' || 'ghcr.io/philhem/drillip:v0.3.17' }}
+      DRILLIP_IMAGE: ${{ matrix.drillip == 'checkout' && 'drillip:ci' || 'ghcr.io/philhem/drillip:v0.3.18' }}
     steps:
       - uses: actions/checkout@v6
       - name: Build checkout image
