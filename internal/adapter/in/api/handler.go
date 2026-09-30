@@ -488,7 +488,7 @@ func writeNotificationsDisabled(w http.ResponseWriter) {
 	writeNotificationError(w, http.StatusServiceUnavailable, &domain.NotificationError{
 		Code:    "notifications_not_configured",
 		Message: "notifications not configured",
-		Hint:    "Set DRILLIP_SMTP_HOST and DRILLIP_SMTP_TO, then restart the Drillip server.",
+		Hint:    "Set DRILLIP_SMTP_HOST and DRILLIP_SMTP_TO in the server environment. For Docker, recreate the container; otherwise restart the Drillip server.",
 	})
 }
 
