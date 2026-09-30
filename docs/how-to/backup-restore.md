@@ -1,7 +1,9 @@
-# Back up and restore Drillip data
+# Back up Drillip data
 
 Use this guide to save a database backup from a running Drillip server.
-You can restore the backup into a new Docker volume to check it or recover data.
+To check an existing backup or recover data, use
+[Restore Drillip data in Docker](restore-backup.md). That procedure does not
+need access to the source server.
 
 ## Before you start
 
@@ -47,76 +49,8 @@ Copy the file to your backup storage. Record the server version and keep its
 matching image available for restoration. To schedule backups, run the same
 command from your existing scheduler with a different filename for each backup.
 
-## 3. Restore into a new Docker volume
+## Check or restore the backup
 
-You need Docker and a Drillip image from the same build
-as the source server. This example uses `drillip:local` from the
-[checkout build instructions](upgrade-cli.md#1-build-and-replace-the-executable)
-and the image's default user. Host port `18301` must be free.
-
-Keep applications connected to the current server during the restore check.
-Replace `restore_image` with your matching image. Run this script to create an
-unused volume and restore the backup into it:
-
-```bash
-set -euo pipefail
-backup_file="$PWD/drillip-backup.db"
-restore_image=drillip:local
-restore_id="$(date -u +%Y%m%dT%H%M%S)-$$"
-restored_volume="drillip-restored-$restore_id"
-restored_container="drillip-restore-check-$restore_id"
-if docker volume inspect "$restored_volume" >/dev/null 2>&1; then
-  printf 'Choose a new destination volume name.\n' >&2
-  exit 1
-fi
-docker volume create "$restored_volume"
-docker run --rm \
-  --mount "type=bind,src=$backup_file,dst=/backup.db,readonly" \
-  --mount "type=volume,src=$restored_volume,dst=/data" \
-  "$restore_image" restore --input /backup.db
-docker run --detach --name "$restored_container" \
-  --mount "type=volume,src=$restored_volume,dst=/data" \
-  --publish 127.0.0.1:18301:8300 \
-  "$restore_image" serve --listen 0.0.0.0:8300 --db /data/errors.db
-```
-
-Drillip checks the backup and writes a new database. It does not replace an
-existing database. The restore command reports the destination:
-
-```text
-restored /data/errors.db
-```
-
-Continue only if each command succeeds. The test container uses the restored
-volume. It has no email or external telemetry configuration.
-
-## 4. Check the restored server
-
-Check health after the test container starts:
-
-```console
-$ restored_url=http://127.0.0.1:18301
-$ drillip --server "$restored_url" health
-ok
-```
-
-If the server is still starting, repeat the health command.
-Use `drillip --server "$restored_url" list` and `show` to check errors you
-expect in the backup. See the [CLI reference](../reference/cli.md).
-
-Stop the test container after the check:
-
-```console
-$ docker stop --timeout 30 "$restored_container"
-drillip-restore-check-20260930T120000-12345
-```
-
-The output shows your test container's name. The restored volume remains available.
-
-## 5. Use the restored volume for recovery
-
-Pause application and operator writes. Stop the current Drillip server.
-Start your normal deployment with the restored volume, matching image, and saved
-configuration. Check server health before you resume writes.
-
-Keep the original volume and backup until you have checked the recovered deployment.
+Use [Restore Drillip data in Docker](restore-backup.md) to check the backup in a
+separate server or recover a deployment. The procedure keeps the backup and the
+original volume.

@@ -109,7 +109,7 @@ It does not replace an existing file, including one created during the download.
 Failed downloads remove the temporary file and do not publish the destination.
 
 The snapshot includes all stored database data. Deployment configuration is
-separate. For restoration, see the [backup and restore guide](../how-to/backup-restore.md).
+separate. For restoration, see the [restore guide](../how-to/restore-backup.md).
 
 ## Restore a database backup
 
@@ -137,7 +137,7 @@ New backups record the snapshot's data time. Restore preserves that time as the
 restored data time and clears the source database's operation history. The new
 restore time survives server restarts. Older backups have an unknown data time.
 Restore does not start the server or change the deployment. See the
-[backup and restore guide](../how-to/backup-restore.md).
+[restore guide](../how-to/restore-backup.md).
 
 ## Find error groups
 
