@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.16 - 2026-09-30
+
+### Fixed
+
+- CLI lists, headings, and follow-up commands show complete fingerprints, so
+  groups with the same first eight characters remain distinguishable and
+  copied commands select the intended group.
+- Individual, digest, and resolution emails retain complete fingerprints,
+  including the commands used to investigate an error.
+
 ## v0.3.15 - 2026-09-29
 
 ### Upgrade

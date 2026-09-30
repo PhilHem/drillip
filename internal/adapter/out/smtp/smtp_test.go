@@ -90,11 +90,11 @@ func TestFormatResolvedHTMLEmail(t *testing.T) {
 		"#f0fdf4", // green row background
 		"ValueError",
 		"bad input",
-		"abcdef12",
+		"abcdef1234567890",
 		"42&times;", // occurrence count badge
 		"IOError",
 		"connection refused",
-		"12345678",
+		"1234567890abcdef",
 		"error",   // level badge
 		"warning", // level badge
 		"drillip top",
@@ -119,10 +119,10 @@ func TestFormatResolvedPlainEmail(t *testing.T) {
 	for _, want := range []string{
 		"RESOLVED: 2 errors in myproject (43 total occurrences)",
 		"1. [error] ValueError: bad input",
-		"fp: abcdef12",
+		"fp: abcdef1234567890",
 		"42x",
 		"2. [warning] IOError: connection refused",
-		"fp: 12345678",
+		"fp: 1234567890abcdef",
 		"drillip top",
 		"drillip recent",
 	} {
@@ -148,7 +148,7 @@ func TestNotifyResolvedHTMLContainsErrorDetails(t *testing.T) {
 	n.workers.Wait()
 
 	msg := string(captured)
-	for _, want := range []string{"RuntimeError", "crash", "abcdef12"} {
+	for _, want := range []string{"RuntimeError", "crash", "abcdef1234567890"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("resolved email missing %q", want)
 		}
@@ -228,25 +228,25 @@ func TestFormatHTMLEmailException(t *testing.T) {
 		"New Issue",
 		"ValueError",
 		"invalid input",
-		"abcdef1234567890",         // fingerprint
-		"abc-123-def",              // event ID
-		"entitlements",             // project
-		"production",               // environment
-		"v1.2.0",                   // release
-		"hpc-entitlements",         // server
-		"python",                   // platform
-		"validate",                 // frame function
-		"app.py",                   // frame file
-		"get_data",                 // lower frame
-		"https://example.com/api/", // request URL
-		"POST",                     // request method
-		"server",                   // tag key
-		"web-1",                    // tag value
-		"1.2.3.4",                  // user IP
-		"alice",                    // username
-		"GET /api/",                // breadcrumb
-		"drillip show abcdef12",    // CLI hint
-		"drillip correlate abcdef12",
+		"abcdef1234567890",              // fingerprint
+		"abc-123-def",                   // event ID
+		"entitlements",                  // project
+		"production",                    // environment
+		"v1.2.0",                        // release
+		"hpc-entitlements",              // server
+		"python",                        // platform
+		"validate",                      // frame function
+		"app.py",                        // frame file
+		"get_data",                      // lower frame
+		"https://example.com/api/",      // request URL
+		"POST",                          // request method
+		"server",                        // tag key
+		"web-1",                         // tag value
+		"1.2.3.4",                       // user IP
+		"alice",                         // username
+		"GET /api/",                     // breadcrumb
+		"drillip show abcdef1234567890", // CLI hint
+		"drillip correlate abcdef1234567890",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("HTML body missing %q", want)
@@ -337,8 +337,8 @@ func TestFormatPlainEmail(t *testing.T) {
 		"Release:     v1.0.0",
 		"Server:      server-1",
 		"env = staging",
-		"drillip show abcdef12",
-		"drillip correlate abcdef12",
+		"drillip show abcdef1234567890",
+		"drillip correlate abcdef1234567890",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("plain text missing %q", want)
@@ -910,13 +910,13 @@ func TestDigestHTMLContainsAllErrors(t *testing.T) {
 		"#d1fae5", // header label color
 		"ValueError",
 		"invalid input",
-		"04827c09",
+		"04827c09abcdef00",
 		"IOError",
 		"connection refused",
-		"a3b1e7f2",
+		"a3b1e7f2abcdef00",
 		"TimeoutError",
 		"request timeout",
-		"9c4d5e6f",
+		"9c4d5e6fabcdef00",
 		"regression", // regression label
 		"#fffbeb",    // amber background for regression row
 		"drillip top",
@@ -968,9 +968,9 @@ func TestDigestPlainTextFormat(t *testing.T) {
 
 	for _, want := range []string{
 		"DIGEST: 3 new errors",
-		"1. [error] ValueError: invalid input (fp: 04827c09)",
-		"2. [error] IOError: connection refused (fp: a3b1e7f2)",
-		"3. [regression] TimeoutError: request timeout (fp: 9c4d5e6f, was resolved for 2 days)",
+		"1. [error] ValueError: invalid input (fp: 04827c09abcdef00)",
+		"2. [error] IOError: connection refused (fp: a3b1e7f2abcdef00)",
+		"3. [regression] TimeoutError: request timeout (fp: 9c4d5e6fabcdef00, was resolved for 2 days)",
 		"drillip top",
 		"drillip recent",
 	} {

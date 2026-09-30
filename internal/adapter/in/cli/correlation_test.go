@@ -39,7 +39,7 @@ func TestCorrelateCommandNeedsOnlyCorrelationPort(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("calls = %d", calls)
 	}
-	for _, expected := range []string{"CheckoutError", "abcdef0123456789", "#2 at 2026-09-28T12:00:00Z", "diagnostic context", "drillip show abcdef01"} {
+	for _, expected := range []string{"CheckoutError", "abcdef0123456789", "#2 at 2026-09-28T12:00:00Z", "diagnostic context", "drillip show abcdef0123456789"} {
 		if !strings.Contains(output.String(), expected) {
 			t.Fatalf("missing %q in output: %s", expected, &output)
 		}
