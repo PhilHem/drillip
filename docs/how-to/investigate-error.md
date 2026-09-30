@@ -12,16 +12,12 @@ Before you start, you need:
 To install the client, follow the [binary installation instructions](run-drillip.md#binary).
 
 Set `DRILLIP_SERVER` to your server's URL. Replace the example URL below.
-Use the same shell for the remaining commands:
+Use the same shell for the remaining commands. In examples that combine commands
+and output, `$` marks a command:
 
-```sh
-export DRILLIP_SERVER=http://127.0.0.1:8300
-drillip health
-```
-
-Expected output:
-
-```text
+```console
+$ export DRILLIP_SERVER=http://127.0.0.1:8300
+$ drillip health
 ok
 ```
 
@@ -86,17 +82,13 @@ remove occurrence history while the group's total count remains; see
 
 Apply and verify the application fix, then mark this group resolved:
 
-```sh
-drillip resolve "$fingerprint"
-```
-
-Expected output, using the example fingerprint:
-
-```text
+```console
+$ drillip resolve "$fingerprint"
 resolved c2a8398a3347b02d
 ```
 
-The fingerprint in the output matches the group you selected. Check its state:
+The output above uses the example fingerprint. Your output shows the fingerprint
+of the group you selected. Check its state:
 
 ```sh
 drillip top --limit 50
@@ -104,8 +96,8 @@ drillip top --limit 50
 
 Its row now shows the state `resolved`; increase the list limit if needed.
 Resolution can send an email according to the server's configuration.
-It preserves the group's history and
-does not itself fix the application. A later matching event reopens the group
+It preserves the group's history and does not itself fix the application.
+A later matching event reopens the group
 as a [regression](../explanation/error-lifecycle.md#resolution-and-regression).
 
 For all options and lookup errors, see the [CLI reference](../reference/cli.md).
