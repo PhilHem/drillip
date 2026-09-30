@@ -121,8 +121,9 @@ and HTTP `502` when sending fails. See the
 {"command_api": 1, "features": ["error_list"]}
 ```
 
-`features` advertises additive operations. `error_list` promises the search and
-pagination contract of `/api/0/list/`. The `list` client checks for this feature
+`features` advertises additive operations. The `error_list` feature is available
+from v0.3.17. It promises the search and pagination contract of `/api/0/list/`.
+The `list` client checks for this feature
 and reports an upgrade requirement if it is absent; it does not fall back to
 another query. Older version 1 servers can omit `features`. The base version
 stays at `1`, so existing clients and commands remain compatible.

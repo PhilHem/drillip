@@ -120,7 +120,8 @@ Repeat the search from the first page if new activity changes the results.
 `recent` selects groups by their **first** occurrence, so an older group that
 occurs again can appear first in `list` without appearing in `recent`.
 
-The server must advertise the `error_list` feature in its
+`list` is available from v0.3.17. The server must advertise the `error_list`
+feature in its
 [capabilities response](http-api.md#command-api-compatibility-and-exact-times).
 If it does not, `list` asks you to upgrade the server. Existing commands continue
 to work with command API version 1 servers that do not offer this feature.
