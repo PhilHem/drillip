@@ -34,7 +34,7 @@ func (c *CLI) runTop(ctx context.Context, cmd *Command, w io.Writer) error {
 	for _, e := range summaries {
 		t, _ := time.Parse(time.RFC3339, e.LastSeen)
 		tableRows = append(tableRows, []string{
-			e.Fingerprint[:8], fmt.Sprintf("%d", e.Count), e.Level, e.State, e.Type, truncate(e.Value, 50), timeAgo(t),
+			e.Fingerprint, fmt.Sprintf("%d", e.Count), e.Level, e.State, e.Type, truncate(e.Value, 50), timeAgo(t),
 		})
 	}
 
@@ -60,7 +60,7 @@ func (c *CLI) runRecent(ctx context.Context, cmd *Command, w io.Writer) error {
 	for _, e := range summaries {
 		t, _ := time.Parse(time.RFC3339, e.FirstSeen)
 		tableRows = append(tableRows, []string{
-			e.Fingerprint[:8], fmt.Sprintf("%d", e.Count), e.Level, e.State, e.Type, truncate(e.Value, 50), timeAgo(t),
+			e.Fingerprint, fmt.Sprintf("%d", e.Count), e.Level, e.State, e.Type, truncate(e.Value, 50), timeAgo(t),
 		})
 	}
 
@@ -136,7 +136,7 @@ func (c *CLI) runShow(ctx context.Context, cmd *Command, w io.Writer) error {
 	// Tag distribution from occurrences
 	printTagDistribution(w, d.TagDist)
 
-	printHint(w, "drillip trend "+fullFP[:8], "drillip correlate "+fullFP[:8],
+	printHint(w, "drillip trend "+fullFP, "drillip correlate "+fullFP,
 		"drillip top --tag key=value")
 	return nil
 }
@@ -182,7 +182,7 @@ func (c *CLI) runTrend(ctx context.Context, cmd *Command, w io.Writer) error {
 
 	fullFP, buckets := trend.Fingerprint, trend.Buckets
 	if len(buckets) == 0 {
-		fmt.Fprintf(w, "no occurrences in the last 24h for %s\n", fullFP[:8])
+		fmt.Fprintf(w, "no occurrences in the last 24h for %s\n", fullFP)
 		return nil
 	}
 
@@ -193,14 +193,14 @@ func (c *CLI) runTrend(ctx context.Context, cmd *Command, w io.Writer) error {
 		}
 	}
 
-	fmt.Fprintf(w, "Trend (last 24h) for %s:\n\n", fullFP[:8])
+	fmt.Fprintf(w, "Trend (last 24h) for %s:\n\n", fullFP)
 	for _, b := range buckets {
 		// Show just the hour part
 		label := b.Hour[11:16]
 		printBar(w, label, b.Count, maxCount, 30)
 	}
 
-	printHint(w, "drillip correlate "+fullFP[:8])
+	printHint(w, "drillip correlate "+fullFP)
 	return nil
 }
 
@@ -277,7 +277,7 @@ func (c *CLI) runCorrelate(ctx context.Context, cmd *Command, w io.Writer) error
 	}
 
 	// Next hints
-	printHint(w, "drillip show "+fullFP[:8], "drillip trend "+fullFP[:8])
+	printHint(w, "drillip show "+fullFP, "drillip trend "+fullFP)
 	return nil
 }
 
@@ -290,7 +290,7 @@ func (c *CLI) runReleases(ctx context.Context, cmd *Command, w io.Writer) error 
 
 	fullFP, releases := result.Fingerprint, result.Releases
 	if len(releases) == 0 {
-		fmt.Fprintf(w, "no occurrences for %s\n", fullFP[:8])
+		fmt.Fprintf(w, "no occurrences for %s\n", fullFP)
 		return nil
 	}
 
@@ -305,7 +305,7 @@ func (c *CLI) runReleases(ctx context.Context, cmd *Command, w io.Writer) error 
 		})
 	}
 
-	fmt.Fprintf(w, "Releases for %s:\n\n", fullFP[:8])
+	fmt.Fprintf(w, "Releases for %s:\n\n", fullFP)
 	printTable(w, []string{"RELEASE", "COUNT", "FIRST SEEN", "LAST SEEN"}, tableRows)
 	return nil
 }
