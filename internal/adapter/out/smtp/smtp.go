@@ -216,7 +216,7 @@ func (n *Notifier) send(subject, textBody, htmlBody string) error {
 			case <-timer.C:
 			case <-n.ctx.Done():
 				timer.Stop()
-				return n.ctx.Err()
+				return deliveryError(n.ctx, "", n.ctx.Err())
 			}
 		}
 		err = n.deliver(auth, msg)
@@ -235,61 +235,72 @@ func (n *Notifier) deliver(auth smtp.Auth, msg []byte) error {
 	ctx, cancel := context.WithTimeout(n.ctx, smtpAttemptTimeout)
 	defer cancel()
 	if err := ctx.Err(); err != nil {
-		return err
+		return deliveryError(ctx, "", err)
 	}
 	if n.sendMail != nil {
-		return n.sendMail(ctx, n.SMTP.Addr(), auth, n.SMTP.From, []string{n.SMTP.To}, msg)
+		return deliveryError(ctx, "", n.sendMail(ctx, n.SMTP.Addr(), auth, n.SMTP.From, []string{n.SMTP.To}, msg))
 	}
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", n.SMTP.Addr())
 	if err != nil {
-		return err
+		return deliveryError(ctx, "connect", err)
 	}
 	defer conn.Close()
 	deadline, _ := ctx.Deadline()
 	if err := conn.SetDeadline(deadline); err != nil {
-		return err
+		return deliveryError(ctx, "", err)
 	}
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
 	c, err := smtp.NewClient(conn, n.SMTP.Host)
 	if err != nil {
-		return err
+		return deliveryError(ctx, "", err)
 	}
 	defer c.Close()
+	// Extension hides greeting errors. Make the normal localhost greeting
+	// explicit so a protocol failure cannot be mistaken for AUTH or MAIL failure.
+	if err := c.Hello("localhost"); err != nil {
+		return deliveryError(ctx, "", err)
+	}
 
 	if ok, _ := c.Extension("STARTTLS"); ok || n.SMTP.SkipVerify {
 		if err := c.StartTLS(&tls.Config{
 			ServerName:         n.SMTP.Host,
 			InsecureSkipVerify: n.SMTP.SkipVerify, //nolint:gosec // explicit operator setting
 		}); err != nil {
-			return err
+			stage := "tls"
+			if state, ok := c.TLSConnectionState(); ok && state.HandshakeComplete {
+				// StartTLS also sends EHLO after the handshake. A rejection at
+				// that point is a protocol failure, not a certificate problem.
+				stage = ""
+			}
+			return deliveryError(ctx, stage, err)
 		}
 	}
 
 	if auth != nil {
 		if err := c.Auth(auth); err != nil {
-			return err
+			return deliveryError(ctx, "auth", err)
 		}
 	}
 
 	if err := c.Mail(n.SMTP.From); err != nil {
-		return err
+		return deliveryError(ctx, "sender", err)
 	}
 	if err := c.Rcpt(n.SMTP.To); err != nil {
-		return err
+		return deliveryError(ctx, "recipient", err)
 	}
 
 	w, err := c.Data()
 	if err != nil {
-		return err
+		return deliveryError(ctx, "", err)
 	}
 	if _, err := w.Write(msg); err != nil {
-		return err
+		return deliveryError(ctx, "", err)
 	}
 	if err := w.Close(); err != nil {
-		return err
+		return deliveryError(ctx, "completion", err)
 	}
-	return c.Quit()
+	return deliveryError(ctx, "completion", c.Quit())
 }
 
 // SendTestEmail sends a simple test email to verify SMTP configuration.
@@ -302,7 +313,7 @@ func (n *Notifier) SendTestEmail() error {
 	n.mu.Lock()
 	if n.closed {
 		n.mu.Unlock()
-		return fmt.Errorf("notifier closed")
+		return deliveryError(n.ctx, "unavailable", fmt.Errorf("notifier closed"))
 	}
 	n.workers.Add(1)
 	n.mu.Unlock()

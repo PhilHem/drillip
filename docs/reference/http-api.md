@@ -109,10 +109,57 @@ limit, offset, or tag syntax returns HTTP `400`.
 `30d`, or `2w`. A silence without `duration` or `expires_at` does not expire. The optional
 `reason` is truncated to 500 bytes. URL-encode query parameter values.
 
-The test-email endpoint returns `{"status":"sent","to":"<recipient>"}`
-when SMTP accepts the message, HTTP `503` when notifications are not configured,
-and HTTP `502` when sending fails. See the
+The test-email endpoint returns HTTP `200` when SMTP accepts the message:
+
+```json
+{"status":"sent","to":"ops@example.com"}
+```
+
+`to` contains the configured recipient. The endpoint returns HTTP `503` when
+notifications are not configured, and HTTP `502` when sending fails. See the
 [email setup guide](../how-to/email-notifications.md) for a complete check.
+
+### Test-email errors
+
+Delivery and configuration failures include three string fields: `error` is a
+human-readable diagnosis, `code` is its stable identifier, and `hint` suggests
+the next check. For example, a rejected SMTP login returns HTTP `502`:
+
+```json
+{
+  "error": "The SMTP server rejected authentication.",
+  "code": "smtp_auth_rejected",
+  "hint": "Check DRILLIP_SMTP_USER, DRILLIP_SMTP_PASS, and the provider's authentication requirements."
+}
+```
+
+| Code | Meaning |
+|---|---|
+| `notifications_not_configured` | SMTP host or recipient is not configured; HTTP `503`. |
+| `smtp_connection_failed` | Name lookup, connection establishment, or an established connection failed. |
+| `smtp_timeout` | An SMTP operation exceeded its deadline. This can occur during any step, including authentication. |
+| `smtp_tls_failed` | STARTTLS or its TLS session setup failed. Certificate verification remains enabled by default. |
+| `smtp_auth_rejected` | The SMTP server explicitly rejected authentication. |
+| `smtp_auth_failed` | Authentication could not complete, for example because the endpoint lacks the required authentication or transport support. |
+| `smtp_sender_rejected` | The SMTP server rejected the sender address. |
+| `smtp_recipient_rejected` | The SMTP server rejected the recipient address. |
+| `smtp_delivery_failed` | Sending failed without a more specific diagnosis. Check the server logs for the underlying error. |
+| `notifications_unavailable` | The notifier is shutting down or has stopped. |
+
+All codes except `notifications_not_configured` use HTTP `502`. A timeout or
+connection failure during authentication is reported as such; it does not imply
+incorrect credentials. Raw SMTP and network error details are recorded in the
+Drillip server logs.
+
+A failure near the end of an SMTP exchange can occur after the server accepted
+the message. Check the recipient mailbox and SMTP server logs before retrying
+when the hint reports this uncertainty.
+
+Use `code` for automation and display `error` and `hint` to operators. The text
+can change independently of the code. Older servers can return only `error`,
+and clients must allow unknown codes. The existing `error` string and HTTP
+statuses are retained; no command API version change is required. Requests with
+a method other than POST still return HTTP `405` with an `error` string.
 
 ## Command API compatibility and exact times
 
