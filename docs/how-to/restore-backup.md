@@ -76,9 +76,44 @@ $ drillip --server "$restored_url" health
 ok
 ```
 
-If the server is still starting, repeat the health command. Use
-`drillip --server "$restored_url" list` and `show` to check errors you expect in
-the backup. See the [CLI reference](../reference/cli.md).
+If the server is still starting, repeat the health command. Health confirms that
+the database is reachable. It does not confirm that you selected the right backup.
+
+Check the restore time and the backup's data time. These timestamps are examples:
+
+```console
+$ drillip --server "$restored_url" health --details
+status: ok
+last_backup_generated_at: unknown
+last_restored_at: 2026-09-30T12:02:00Z
+restored_snapshot_at: 2026-09-30T12:00:00Z
+```
+
+`last_restored_at` records this restore. `restored_snapshot_at` records the data
+time, so it can be earlier. Older backups show `unknown` for the data time.
+The new database has not generated a backup yet.
+
+Check an error that you expect at that data time. Replace the example
+[fingerprint](../reference/glossary.md#fingerprint) with a known fingerprint from
+your backup. This excerpt uses example data and omits other output fields:
+
+```console
+$ fingerprint=63fe27befddcf06b
+$ drillip --server "$restored_url" show "$fingerprint"
+...
+Fingerprint: 63fe27befddcf06b
+Level:       error
+Type:        message
+Value:       Backup validation open
+Count:       3
+...
+```
+
+Check the fingerprint, message, and count against the history you expect. Use
+`list` to find more errors and `silences` to check notification silences. If the
+backup should be empty, use `stats` to check its zero totals. See the
+[CLI reference](../reference/cli.md) for those commands. A successful integrity
+check and health response do not replace these content checks.
 
 Stop the test server after you have checked the data:
 
@@ -124,5 +159,6 @@ $ drillip --server http://127.0.0.1:8300 health
 ok
 ```
 
-Check the expected data again before you resume writes. Keep the original volume
+Repeat the `health --details` and content checks at the recovered server's address
+before you resume writes. Keep the original volume
 and backup until you have checked the recovered deployment.

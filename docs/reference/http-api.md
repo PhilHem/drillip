@@ -210,7 +210,7 @@ a method other than POST still return HTTP `405` with an `error` string.
 `GET /api/0/capabilities/` returns:
 
 ```json
-{"command_api": 1, "features": ["error_list", "database_backup"]}
+{"command_api": 1, "features": ["error_list", "database_history", "database_backup"]}
 ```
 
 `features` advertises additive operations. The `error_list` feature is available
@@ -263,9 +263,39 @@ exact stored fingerprint from the silences list.
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/` or `/-/healthy` | Returns `ok` if the database is reachable |
+| `GET` | `/api/0/health/` | Returns database health with persisted backup and restore times |
 
-A health check returns HTTP `200` with `ok` when the database is reachable,
-or HTTP `503` with `{"error":"db unhealthy"}` when it is not.
+`/-/healthy` returns HTTP `200` when the database is reachable:
+
+```text
+ok
+```
+
+If the database is unavailable, it returns HTTP `503`:
+
+```json
+{"error":"db unhealthy"}
+```
+
+`/api/0/health/` requires the `database_history` capability. It returns HTTP `200`
+when it can read the database history, or `503` when the history is unavailable.
+Unknown times are JSON `null`. The timestamps below are examples:
+
+```json
+{
+  "status": "ok",
+  "last_backup_generated_at": null,
+  "last_restored_at": "2026-09-30T12:02:00Z",
+  "restored_snapshot_at": "2026-09-30T12:00:00Z"
+}
+```
+
+`last_backup_generated_at` records a complete, checked server snapshot, not
+client-side storage. `last_restored_at` records a successful Drillip restore.
+`restored_snapshot_at` identifies the restored data time; older backups have no
+recorded data time. Restore clears operation times inherited from the source.
+The history persists across server restarts. Missing backups do not make the
+server unhealthy. Health does not verify the database's full contents.
 
 ## Response fields
 

@@ -74,13 +74,14 @@ arguments. Do not type the brackets.
 | `drillip silence [--reason <text>] <fingerprint> [duration]` | Silence notifications for the uniquely identified error, indefinitely if duration is omitted. |
 | `drillip silences` | List active silences. |
 | `drillip unsilence <fingerprint>` | Remove silences for the uniquely identified error. |
-| `drillip health` | Call `/-/healthy` at the configured address; print `ok` on HTTP `200`, with a two-second request deadline. |
+| `drillip health [--details]` | Check database access; print `ok`, or show persisted backup and restore times with `--details`. |
 | `drillip backup --output <path>` | Save a complete database snapshot from the running server to a new local file. |
 | `drillip restore --input <path> [--db <new-path>]` | Check a standalone Drillip backup and restore it to a new local database. |
 
 Investigation and state commands have a ten-second deadline covering compatibility checking and
-the operation. `health` has a two-second deadline and does not need the command
-API compatibility check. Failures never fall back to a database, follow redirects,
+the operation. `health` has a two-second deadline. The simple probe does not need
+the command API compatibility check; `health --details` checks `database_history`.
+Failures never fall back to a database, follow redirects,
 or automatically retry mutations. A connection failure after submission may mean
 the server already changed state; inspect the state before retrying.
 
@@ -138,6 +139,34 @@ restored data time and clears the source database's operation history. The new
 restore time survives server restarts. Older backups have an unknown data time.
 Restore does not start the server or change the deployment. See the
 [restore guide](../how-to/restore-backup.md).
+
+## Check health and database history
+
+`health` calls `/-/healthy` and prints `ok` when the database is reachable.
+`health --details` calls `/api/0/health/` after a capability check. Its two-second
+deadline includes that check. Older servers report an upgrade requirement;
+their simple health probe remains usable.
+
+The times below are examples. Unknown times print `unknown`:
+
+```console
+$ drillip health --details
+status: ok
+last_backup_generated_at: 2026-09-30T12:00:08Z
+last_restored_at: 2026-09-30T11:30:00Z
+restored_snapshot_at: 2026-09-30T11:00:00Z
+```
+
+`last_backup_generated_at` records the last complete snapshot checked by this
+database's server. It does not confirm a complete client download or storage
+outside the server. `last_restored_at` records the last successful Drillip restore.
+`restored_snapshot_at` is the data time of that restore's input. It is unknown for
+older backups. New restores clear the source database's operation times; their
+own times survive server restarts. Manual copying does not record a new restore.
+
+These fields describe recorded operations. A missing or old backup does not
+change health status. Neither health output nor a restore timestamp proves that
+the database contains the history you expect; follow the restore guide's checks.
 
 ## Find error groups
 
