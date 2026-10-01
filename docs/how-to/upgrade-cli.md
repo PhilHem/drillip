@@ -124,5 +124,5 @@ The systemd-managed state directory may require service-administration privilege
 normal server commands avoid that filesystem-access requirement.
 
 Before replacing a Docker deployment, [back up its database volume and verify a
-restore](backup-restore.md). Keep the original volume and configuration available
+restore](restore-backup.md). Keep the original volume and configuration available
 until the upgraded deployment is verified.

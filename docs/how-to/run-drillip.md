@@ -18,6 +18,7 @@ Run this command with Docker installed and running:
 
 ```bash
 docker run -d \
+  --name drillip \
   -v drillip-data:/data \
   -p 127.0.0.1:8300:8300 \
   -e DRILLIP_DB=/data/errors.db \
@@ -67,5 +68,5 @@ binary and unit, enable startup at boot, and check the running service.
 Check the running server at `/-/healthy` on its configured address. A healthy
 server returns `ok`. Then [connect your application](send-errors.md).
 
-For a persistent Docker installation, [back up the database volume and verify a
-restore](backup-restore.md) before relying on the stored history.
+For a persistent Docker installation, [back up the data](backup-restore.md) and
+[check a restore](restore-backup.md) before relying on the stored history.
