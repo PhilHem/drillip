@@ -126,10 +126,15 @@ journal files. Restore checks SQLite integrity, the required Drillip tables and
 columns, and the backup format. Use a matching Drillip build. Older Drillip
 backups without format metadata are accepted if their schema is compatible.
 
-The command stages the data in the destination directory, records the new restore
-time, and publishes a complete file with permissions `0600`. It preserves the
-input and refuses an existing destination, symlink, or SQLite sidecar. A failure
-before publication removes the staged files. The destination directory must exist.
+Choose a new destination path in an existing directory. Restore does not overwrite
+files or follow a symbolic link at that path. The backup file stays unchanged.
+
+SQLite can create additional files beside a database. For the example above,
+`restored.db-wal`, `restored.db-shm`, and `restored.db-journal` must not exist.
+
+Restore checks a temporary copy and records the restore time in it. It then
+creates the destination file with permissions `0600`. If it fails before that
+step, it removes the temporary files.
 
 New backups record the snapshot's data time. Restore preserves that time as the
 restored data time and clears the source database's operation history. The new
