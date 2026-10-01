@@ -121,10 +121,11 @@ $ drillip restore --input drillip-backup.db --db restored.db
 restored restored.db
 ```
 
-The input must be a standalone SQLite backup without WAL, shared-memory, or
-journal files. Restore checks SQLite integrity, the required Drillip tables and
-columns, and the backup format. Use a matching Drillip build. Older Drillip
-backups without format metadata are accepted if their schema is compatible.
+Use a backup created by `drillip backup`. Restore checks the file before it
+creates the new database.
+
+Use a matching Drillip build. Older Drillip backups without format metadata are
+accepted if their schema is compatible.
 
 Choose a new destination path in an existing directory. Restore does not overwrite
 files or follow a symbolic link at that path. The backup file stays unchanged.
