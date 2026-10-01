@@ -18,7 +18,9 @@ import (
 
 func databaseRows(t *testing.T, db *sql.DB) string {
 	t.Helper()
-	rows, err := db.Query("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name")
+	// Backup and restore intentionally replace operational metadata. Compare all
+	// application tables here; timestamp and format behavior have separate checks.
+	rows, err := db.Query("SELECT name FROM sqlite_schema WHERE type='table' AND name!='drillip_metadata' ORDER BY name")
 	if err != nil {
 		t.Fatal(err)
 	}

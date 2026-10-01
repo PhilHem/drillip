@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -24,13 +25,19 @@ func (s *Store) RawDB() *sql.DB {
 
 // Open creates a new Store backed by the SQLite database at path.
 func Open(path string) (*Store, error) {
-	sqlDB, err := sql.Open("sqlite", path)
+	// Driver pragmas apply to every pooled connection, including the connection
+	// that records a completed backup while the other connection keeps writing.
+	sqlDB, err := openDatabaseFile(path, "rwc")
 	if err != nil {
 		return nil, err
 	}
 
 	sqlDB.SetMaxOpenConns(2) // SQLite WAL allows 1 writer + concurrent readers, keep pool small
 	sqlDB.SetMaxIdleConns(2)
+	if err := checkBackupFormat(context.Background(), sqlDB); err != nil {
+		sqlDB.Close()
+		return nil, err
+	}
 
 	_, err = sqlDB.Exec(`
 		PRAGMA journal_mode=WAL;
@@ -90,6 +97,10 @@ func Open(path string) (*Store, error) {
 
 	s := &Store{db: sqlDB, backupGate: make(chan struct{}, 1)}
 	if err := s.migrateDB(); err != nil {
+		sqlDB.Close()
+		return nil, err
+	}
+	if _, err := sqlDB.Exec(metadataSchema); err != nil {
 		sqlDB.Close()
 		return nil, err
 	}
