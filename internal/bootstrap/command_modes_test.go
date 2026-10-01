@@ -60,6 +60,7 @@ func TestEveryNormalCommandUsesServer(t *testing.T) {
 		args []string
 		want string
 	}{
+		{[]string{"list", "--search", "COMMAND-mode", "--tag", "key=a&b+c"}, fp},
 		{[]string{"top", "--limit", "1"}, fp}, {[]string{"recent", "--tag", "key=a&b+c"}, fp},
 		{[]string{"show", fp}, event.Fingerprint}, {[]string{"trend", fp}, "Trend"}, {[]string{"releases", fp}, "v1"},
 		{[]string{"correlate", fp}, "server-owned diagnostic"}, {[]string{"stats"}, "Unique errors:      1"},
@@ -82,9 +83,9 @@ func TestHelpAndInvalidInputNeverAccessBackend(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "never-created.db")
 	t.Setenv("DRILLIP_DB", db)
 	for _, args := range [][]string{
-		{"--help"}, {"serve", "--help"}, {"maintenance", "--help"}, {"show", "--help"}, {"top", "--help"}, {"health", "--help"},
+		{"--help"}, {"serve", "--help"}, {"show", "--help"}, {"top", "--help"}, {"health", "--help"}, {"list", "--help"},
+		{"list", "--limit", "0"}, {"list", "--limit", "501"}, {"list", "--offset", "-1"}, {"list", "--sort", "invalid"}, {"list", "--tag", "invalid"},
 		{"unknown"}, {"show"}, {"show", "bad!"}, {"show", "abcd", "extra"}, {"top", "--limit", "0"}, {"recent", "--hours", "-1"}, {"silence", "abcd", "bad-duration"}, {"gc", "nonsense"}, {"stats", "unexpected"}, {"health", "unexpected"},
-		{"maintenance", "--db", db, "show", "--help"}, {"maintenance", "--db", db, "show", "bad!"}, {"maintenance", "--db", db, "top", "--limit", "0"},
 	} {
 		var out, errout bytes.Buffer
 		_ = Run(context.Background(), args, &out, &errout)
@@ -96,7 +97,7 @@ func TestHelpAndInvalidInputNeverAccessBackend(t *testing.T) {
 		t.Fatalf("database created: %v", err)
 	}
 }
-func TestMaintenanceIsExplicitExistingAndOffline(t *testing.T) {
+func TestRemovedMaintenanceNeverAccessesBackend(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1) }))
 	defer srv.Close()
@@ -106,27 +107,56 @@ func TestMaintenanceIsExplicitExistingAndOffline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
-	event, _ := s.StoreEvent(&domain.Event{Message: "offline"})
-	t.Setenv("DRILLIP_DB", db)
-	for _, args := range [][]string{{"maintenance", "top"}, {"maintenance", "--db", db + "missing", "top"}, {"--server", srv.URL, "maintenance", "--db", db, "top"}, {"maintenance", "--db", db, "health"}} {
-		var out bytes.Buffer
-		if err := Run(context.Background(), args, &out, &out); err == nil {
-			t.Fatalf("accepted %v", args)
-		}
+	event, err := s.StoreEvent(&domain.Event{Message: "keep unchanged"})
+	if err != nil {
+		s.Close()
+		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"maintenance", "--db", db, "show", event.Fingerprint}, {"maintenance", "--db", db, "resolve", event.Fingerprint}, {"maintenance", "--db", db, "correlate", event.Fingerprint}} {
-		var out bytes.Buffer
-		if err := Run(context.Background(), args, &out, &out); err != nil {
-			t.Fatalf("%v: %v", args, err)
-		}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(t.TempDir(), "never-created.db")
+	t.Setenv("DRILLIP_DB", missing)
+	for _, args := range [][]string{
+		{"maintenance"}, {"maintenance", "--help"},
+		{"maintenance", "--db", db, "show", event.Fingerprint},
+		{"maintenance", "--db", db, "resolve", event.Fingerprint},
+		{"maintenance", "--db", db, "silence", event.Fingerprint},
+		{"maintenance", "--db", db, "gc", "1h"},
+		{"maintenance", "--db", missing, "list"},
+		{"maintenance", "--db", db, "backup", "--output", missing},
+		{"--server", srv.URL, "maintenance", "--db", db, "resolve", event.Fingerprint},
+		{"--db", db, "maintenance", "show", event.Fingerprint},
+		{"--offline", "--db", db, "resolve", event.Fingerprint},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			var out, errout bytes.Buffer
+			err := Run(context.Background(), args, &out, &errout)
+			if err == nil || !strings.Contains(err.Error(), "was removed") || !strings.Contains(err.Error(), "serve --db PATH") || !strings.Contains(err.Error(), "--server URL COMMAND") {
+				t.Fatalf("missing migration instructions: %v", err)
+			}
+			if out.Len() != 0 {
+				t.Fatalf("removed command wrote stdout: %s", &out)
+			}
+		})
 	}
 	if calls.Load() != 0 {
-		t.Fatalf("maintenance made %d requests", calls.Load())
+		t.Fatalf("removed command made %d requests", calls.Load())
 	}
-	detail, _ := s.GetDetail(event.Fingerprint)
-	if detail.ResolvedAt == "" {
-		t.Fatal("did not resolve locally")
+	after, err := os.ReadFile(db)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("removed command changed the database: %v", err)
+	}
+	if _, err := os.Stat(missing); !os.IsNotExist(err) {
+		t.Fatalf("removed command created a file: %v", err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(db))
+	if err != nil || len(entries) != 1 || entries[0].Name() != "local.db" {
+		t.Fatalf("removed command left database sidecars: %v, %v", entries, err)
 	}
 }
 func TestClientTargetPrecedencePreservesLegacyAddress(t *testing.T) {

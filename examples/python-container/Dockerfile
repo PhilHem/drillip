@@ -1,4 +1,4 @@
-ARG DRILLIP_IMAGE=ghcr.io/philhem/drillip:v0.3.14
+ARG DRILLIP_IMAGE=ghcr.io/philhem/drillip:v0.3.18
 FROM ${DRILLIP_IMAGE} AS drillip
 FROM python:3.13-slim-bookworm
 

@@ -8,8 +8,8 @@ Drillip reuses your host, container, or network access controls, so you do not n
 to configure separate Drillip accounts or tokens. Keep the endpoint within that
 shared boundary; see [the operating model](../explanation/operating-model.md).
 
-The Docker example below pins v0.3.14; `@latest` installs the latest tagged version.
-The server-based CLI is available from v0.3.15. For an existing deployment, follow
+The Docker and binary examples below pin v0.3.18, including its server-based CLI.
+For an existing deployment, follow
 [the CLI upgrade procedure](upgrade-cli.md) to update the server and client together.
 
 ## Docker
@@ -22,7 +22,7 @@ docker run -d \
   -p 127.0.0.1:8300:8300 \
   -e DRILLIP_DB=/data/errors.db \
   -e DRILLIP_ADDR=0.0.0.0:8300 \
-  ghcr.io/philhem/drillip:v0.3.14
+  ghcr.io/philhem/drillip:v0.3.18
 ```
 
 The database persists in the `drillip-data` volume. The published port is
@@ -34,10 +34,23 @@ example, follow [Run a Python service and Drillip in one container](../tutorials
 
 ## Binary
 
-With Go installed, run:
+Install the Go version specified in [go.mod](../../go.mod), currently Go 1.26.
+Then install Drillip:
 
 ```bash
-go install github.com/PhilHem/drillip@latest
+go install github.com/PhilHem/drillip@v0.3.18
+```
+
+Add the directory that contains the installed `drillip` executable to your
+shell's `PATH`. Confirm that the shell can find the command:
+
+```sh
+drillip --help
+```
+
+To start a server, run:
+
+```sh
 drillip serve
 ```
 

@@ -216,7 +216,7 @@ func (n *Notifier) send(subject, textBody, htmlBody string) error {
 			case <-timer.C:
 			case <-n.ctx.Done():
 				timer.Stop()
-				return n.ctx.Err()
+				return deliveryError(n.ctx, "", n.ctx.Err())
 			}
 		}
 		err = n.deliver(auth, msg)
@@ -235,61 +235,72 @@ func (n *Notifier) deliver(auth smtp.Auth, msg []byte) error {
 	ctx, cancel := context.WithTimeout(n.ctx, smtpAttemptTimeout)
 	defer cancel()
 	if err := ctx.Err(); err != nil {
-		return err
+		return deliveryError(ctx, "", err)
 	}
 	if n.sendMail != nil {
-		return n.sendMail(ctx, n.SMTP.Addr(), auth, n.SMTP.From, []string{n.SMTP.To}, msg)
+		return deliveryError(ctx, "", n.sendMail(ctx, n.SMTP.Addr(), auth, n.SMTP.From, []string{n.SMTP.To}, msg))
 	}
 	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", n.SMTP.Addr())
 	if err != nil {
-		return err
+		return deliveryError(ctx, "connect", err)
 	}
 	defer conn.Close()
 	deadline, _ := ctx.Deadline()
 	if err := conn.SetDeadline(deadline); err != nil {
-		return err
+		return deliveryError(ctx, "", err)
 	}
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
 	c, err := smtp.NewClient(conn, n.SMTP.Host)
 	if err != nil {
-		return err
+		return deliveryError(ctx, "", err)
 	}
 	defer c.Close()
+	// Extension hides greeting errors. Make the normal localhost greeting
+	// explicit so a protocol failure cannot be mistaken for AUTH or MAIL failure.
+	if err := c.Hello("localhost"); err != nil {
+		return deliveryError(ctx, "", err)
+	}
 
 	if ok, _ := c.Extension("STARTTLS"); ok || n.SMTP.SkipVerify {
 		if err := c.StartTLS(&tls.Config{
 			ServerName:         n.SMTP.Host,
 			InsecureSkipVerify: n.SMTP.SkipVerify, //nolint:gosec // explicit operator setting
 		}); err != nil {
-			return err
+			stage := "tls"
+			if state, ok := c.TLSConnectionState(); ok && state.HandshakeComplete {
+				// StartTLS also sends EHLO after the handshake. A rejection at
+				// that point is a protocol failure, not a certificate problem.
+				stage = ""
+			}
+			return deliveryError(ctx, stage, err)
 		}
 	}
 
 	if auth != nil {
 		if err := c.Auth(auth); err != nil {
-			return err
+			return deliveryError(ctx, "auth", err)
 		}
 	}
 
 	if err := c.Mail(n.SMTP.From); err != nil {
-		return err
+		return deliveryError(ctx, "sender", err)
 	}
 	if err := c.Rcpt(n.SMTP.To); err != nil {
-		return err
+		return deliveryError(ctx, "recipient", err)
 	}
 
 	w, err := c.Data()
 	if err != nil {
-		return err
+		return deliveryError(ctx, "", err)
 	}
 	if _, err := w.Write(msg); err != nil {
-		return err
+		return deliveryError(ctx, "", err)
 	}
 	if err := w.Close(); err != nil {
-		return err
+		return deliveryError(ctx, "completion", err)
 	}
-	return c.Quit()
+	return deliveryError(ctx, "completion", c.Quit())
 }
 
 // SendTestEmail sends a simple test email to verify SMTP configuration.
@@ -302,7 +313,7 @@ func (n *Notifier) SendTestEmail() error {
 	n.mu.Lock()
 	if n.closed {
 		n.mu.Unlock()
-		return fmt.Errorf("notifier closed")
+		return deliveryError(n.ctx, "unavailable", fmt.Errorf("notifier closed"))
 	}
 	n.workers.Add(1)
 	n.mu.Unlock()
@@ -489,10 +500,6 @@ func formatResolvedHTMLEmail(resolved []domain.ResolvedError, project string) st
 	b.WriteString(`<tr><td style="padding:32px 40px;">`)
 
 	for i, r := range resolved {
-		fpShort := r.Fingerprint
-		if len(fpShort) > 8 {
-			fpShort = fpShort[:8]
-		}
 		evValue := domain.StripLogPrefix(r.Value)
 		levelColor, levelBg := resolvedLevelStyle(r.Level)
 
@@ -518,7 +525,7 @@ func formatResolvedHTMLEmail(resolved []domain.ResolvedError, project string) st
 		timeSpan := resolvedTimeSpan(r.FirstSeen, r.LastSeen)
 		b.WriteString(`<div style="padding:6px 16px;background-color:#f8fafc;border-top:1px solid #e2e8f0;">`)
 		b.WriteString(`<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>`)
-		b.WriteString(fmt.Sprintf(`<td style="color:#94a3b8;font-size:11px;font-family:'SF Mono',Monaco,'Courier New',monospace;">%s</td>`, html.EscapeString(fpShort)))
+		b.WriteString(fmt.Sprintf(`<td style="color:#94a3b8;font-size:11px;font-family:'SF Mono',Monaco,'Courier New',monospace;">%s</td>`, html.EscapeString(r.Fingerprint)))
 		if timeSpan != "" {
 			b.WriteString(fmt.Sprintf(`<td style="color:#94a3b8;font-size:11px;text-align:right;">%s</td>`, timeSpan))
 		}
@@ -590,14 +597,10 @@ func formatResolvedPlainEmail(resolved []domain.ResolvedError, project string) s
 	b.WriteString("\n\n")
 
 	for i, r := range resolved {
-		fpShort := r.Fingerprint
-		if len(fpShort) > 8 {
-			fpShort = fpShort[:8]
-		}
 		evValue := domain.StripLogPrefix(r.Value)
 
 		b.WriteString(fmt.Sprintf("%d. [%s] %s: %s\n", i+1, r.Level, r.Type, evValue))
-		b.WriteString(fmt.Sprintf("   fp: %s", fpShort))
+		b.WriteString(fmt.Sprintf("   fp: %s", r.Fingerprint))
 		if r.Count > 1 {
 			b.WriteString(fmt.Sprintf("  |  %dx", r.Count))
 		}
@@ -666,10 +669,6 @@ func formatDigestHTMLEmail(items []pendingNotification, project string) string {
 	for _, p := range items {
 		evType, evValue := extractException(p.Event)
 		level := p.Event.EffectiveLevel()
-		fpShort := p.Fingerprint
-		if len(fpShort) > 8 {
-			fpShort = fpShort[:8]
-		}
 
 		// Truncate long values
 		if len(evValue) > 50 {
@@ -702,7 +701,7 @@ func formatDigestHTMLEmail(items []pendingNotification, project string) string {
 		b.WriteString(fmt.Sprintf(`<td style="padding:10px 12px;border-top:1px solid #e2e8f0;"><span style="display:inline-block;padding:2px 8px;background-color:%s;color:%s;font-size:11px;border-radius:3px;font-weight:500;">%s</span></td>`, badgeBg, badgeColor, html.EscapeString(levelLabel)))
 		b.WriteString(fmt.Sprintf(`<td style="padding:10px 12px;border-top:1px solid #e2e8f0;color:#1e293b;font-size:13px;font-weight:600;font-family:'SF Mono',Monaco,'Courier New',monospace;">%s</td>`, html.EscapeString(evType)))
 		b.WriteString(fmt.Sprintf(`<td style="padding:10px 12px;border-top:1px solid #e2e8f0;color:#475569;font-size:13px;">%s</td>`, html.EscapeString(evValue)))
-		b.WriteString(fmt.Sprintf(`<td style="padding:10px 12px;border-top:1px solid #e2e8f0;font-family:'SF Mono',Monaco,'Courier New',monospace;font-size:12px;color:#64748b;">%s</td>`, html.EscapeString(fpShort)))
+		b.WriteString(fmt.Sprintf(`<td style="padding:10px 12px;border-top:1px solid #e2e8f0;font-family:'SF Mono',Monaco,'Courier New',monospace;font-size:12px;color:#64748b;">%s</td>`, html.EscapeString(p.Fingerprint)))
 		b.WriteString(`</tr>`)
 	}
 
@@ -731,20 +730,16 @@ func formatDigestPlainEmail(items []pendingNotification) string {
 	for i, p := range items {
 		evType, evValue := extractException(p.Event)
 		level := p.Event.EffectiveLevel()
-		fpShort := p.Fingerprint
-		if len(fpShort) > 8 {
-			fpShort = fpShort[:8]
-		}
 
 		if p.IsRegression {
-			line := fmt.Sprintf("%d. [regression] %s: %s (fp: %s", i+1, evType, evValue, fpShort)
+			line := fmt.Sprintf("%d. [regression] %s: %s (fp: %s", i+1, evType, evValue, p.Fingerprint)
 			if p.ResolvedFor > 0 {
 				line += fmt.Sprintf(", was resolved for %s", formatDuration(p.ResolvedFor))
 			}
 			line += ")\n"
 			b.WriteString(line)
 		} else {
-			b.WriteString(fmt.Sprintf("%d. [%s] %s: %s (fp: %s)\n", i+1, level, evType, evValue, fpShort))
+			b.WriteString(fmt.Sprintf("%d. [%s] %s: %s (fp: %s)\n", i+1, level, evType, evValue, p.Fingerprint))
 		}
 	}
 
@@ -766,10 +761,6 @@ func formatHTMLEmail(ev *domain.Event, fp, project string, isRegression bool, re
 	evType, evValue := extractException(ev)
 	level := ev.EffectiveLevel()
 	now := time.Now().UTC().Format("January 2, 2006, 3:04:05 p.m. UTC")
-	fpShort := fp
-	if len(fpShort) > 8 {
-		fpShort = fpShort[:8]
-	}
 
 	// Choose colors based on regression vs new
 	headerBg := "#e74c3c"
@@ -910,7 +901,7 @@ func formatHTMLEmail(ev *domain.Event, fp, project string, isRegression bool, re
 	// CLI hint
 	b.WriteString(`<tr><td style="padding:0 40px 32px 40px;">`)
 	b.WriteString(`<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;">`)
-	b.WriteString(fmt.Sprintf(`<tr><td style="padding:16px 20px;"><p style="margin:0 0 8px 0;color:#0369a1;font-size:13px;font-weight:600;">Investigate</p><p style="margin:0 0 4px 0;color:#1e293b;font-size:13px;font-family:'SF Mono',Monaco,'Courier New',monospace;">drillip show %s</p><p style="margin:0;color:#1e293b;font-size:13px;font-family:'SF Mono',Monaco,'Courier New',monospace;">drillip correlate %s</p></td></tr>`, fpShort, fpShort))
+	b.WriteString(fmt.Sprintf(`<tr><td style="padding:16px 20px;"><p style="margin:0 0 8px 0;color:#0369a1;font-size:13px;font-weight:600;">Investigate</p><p style="margin:0 0 4px 0;color:#1e293b;font-size:13px;font-family:'SF Mono',Monaco,'Courier New',monospace;">drillip show %s</p><p style="margin:0;color:#1e293b;font-size:13px;font-family:'SF Mono',Monaco,'Courier New',monospace;">drillip correlate %s</p></td></tr>`, fp, fp))
 	b.WriteString(`</table></td></tr>`)
 
 	// Footer
@@ -1112,10 +1103,6 @@ func formatPlainEmail(ev *domain.Event, fp, project string, isRegression bool, r
 	evType, evValue := extractException(ev)
 	level := ev.EffectiveLevel()
 	now := time.Now().UTC().Format(time.RFC3339)
-	fpShort := fp
-	if len(fpShort) > 8 {
-		fpShort = fpShort[:8]
-	}
 
 	var b strings.Builder
 
@@ -1180,7 +1167,7 @@ func formatPlainEmail(ev *domain.Event, fp, project string, isRegression bool, r
 		}
 	}
 
-	b.WriteString(fmt.Sprintf("\n---\nInvestigate:\n  drillip show %s\n  drillip correlate %s\n", fpShort, fpShort))
+	b.WriteString(fmt.Sprintf("\n---\nInvestigate:\n  drillip show %s\n  drillip correlate %s\n", fp, fp))
 
 	return b.String()
 }

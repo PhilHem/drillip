@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -41,17 +42,26 @@ func (c *Client) request(ctx context.Context, method, path string, query url.Val
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	if path != "/-/healthy" {
-		var version struct {
-			CommandAPI int `json:"command_api"`
+		version, err := c.capabilities(ctx)
+		if err != nil {
+			return err
 		}
-		if err := c.exchange(ctx, http.MethodGet, "/api/0/capabilities/", nil, &version, "command_api"); err != nil {
-			return fmt.Errorf("server command API unavailable; upgrade the server together with the CLI: %w", err)
-		}
-		if version.CommandAPI != 1 {
-			return fmt.Errorf("unsupported server command API %d; upgrade the server together with the CLI", version.CommandAPI)
+		if path == "/api/0/list/" && !slices.Contains(version.Features, httpwire.FeatureErrorList) {
+			return fmt.Errorf("server does not support drillip list; upgrade the server together with the CLI")
 		}
 	}
 	return c.exchange(ctx, method, path, query, result, required...)
+}
+
+func (c *Client) capabilities(ctx context.Context) (httpwire.Capabilities, error) {
+	var version httpwire.Capabilities
+	if err := c.exchange(ctx, http.MethodGet, "/api/0/capabilities/", nil, &version, "command_api"); err != nil {
+		return version, fmt.Errorf("server command API unavailable; upgrade the server together with the CLI: %w", err)
+	}
+	if version.CommandAPI != 1 {
+		return version, fmt.Errorf("unsupported server command API %d; upgrade the server together with the CLI", version.CommandAPI)
+	}
+	return version, nil
 }
 
 func (c *Client) exchange(ctx context.Context, method, path string, query url.Values, result any, required ...string) error {
