@@ -19,7 +19,7 @@ import (
 
 func TestRootHelpDescribesAvailableCommands(t *testing.T) {
 	var output bytes.Buffer
-	if err := Run(context.Background(), []string{"--help"}, &output, &output); err != nil {
+	if err := Run(context.Background(), []string{"--help"}, nil, &output, &output); err != nil {
 		t.Fatal(err)
 	}
 	for _, command := range []string{"list", "top", "recent", "show", "trend", "releases", "correlate", "stats", "resolve", "silence", "silences", "unsilence", "gc", "health", "backup", "restore", "serve"} {
@@ -66,7 +66,7 @@ func TestListPaginationHintsPreserveSelectedServer(t *testing.T) {
 	run := func(args []string) string {
 		t.Helper()
 		var output, stderr bytes.Buffer
-		if err := Run(context.Background(), args, &output, &stderr); err != nil {
+		if err := Run(context.Background(), args, nil, &output, &stderr); err != nil {
 			t.Fatalf("%q: %v; stderr: %s", args, err, &stderr)
 		}
 		return output.String()
