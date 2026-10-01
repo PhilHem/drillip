@@ -13,7 +13,6 @@ import (
 	"github.com/PhilHem/drillip/internal/adapter/in/cli"
 	"github.com/PhilHem/drillip/internal/adapter/out/httpclient"
 	store "github.com/PhilHem/drillip/internal/adapter/out/sqlite"
-	"github.com/PhilHem/drillip/internal/application/service"
 )
 
 // Run parses an invocation before connecting its explicitly selected backend.
@@ -35,8 +34,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flags("drillip", stderr)
 	server := fs.String("server", "", "Drillip server URL (overrides DRILLIP_SERVER)")
 	legacyAddr := fs.String("addr", "", "deprecated: use --server URL or serve --listen address")
-	legacyDB := fs.String("db", "", "deprecated global server DB option; use serve --db or maintenance --db")
-	offline := fs.Bool("offline", false, "removed: use maintenance --db PATH COMMAND")
+	legacyDB := fs.String("db", "", "deprecated global server DB option; use serve --db")
+	offline := fs.Bool("offline", false, "removed: start serve --db PATH and use --server URL")
 	globalUsage := fs.Usage
 	fs.Usage = func() {
 		globalUsage()
@@ -56,8 +55,9 @@ Commands:
   unsilence    Remove an error group's notification silence
   gc           Delete occurrences older than a duration
   health       Check server health
+  backup       Save a consistent backup of the server database
+  restore      Restore a checked backup into a new local database
   serve        Run the server (default command)
-  maintenance  Run a command against an existing local database
 
 Use drillip COMMAND --help for command options.
 `)
@@ -75,7 +75,7 @@ Use drillip COMMAND --help for command options.
 		return fmt.Errorf("--%s requires a nonempty value", emptyOption)
 	}
 	if *offline {
-		return fmt.Errorf("--offline was replaced by maintenance --db PATH COMMAND")
+		return fmt.Errorf("--offline was removed; start drillip serve --db PATH, then use drillip --server URL COMMAND")
 	}
 	rest := fs.Args()
 	mode := "serve"
@@ -87,6 +87,24 @@ Use drillip COMMAND --help for command options.
 		return fmt.Errorf("use --server or legacy --addr, not both")
 	}
 	switch mode {
+	case "restore":
+		if *server != "" || *legacyAddr != "" || *legacyDB != "" {
+			return fmt.Errorf("restore uses local files; use restore --input PATH --db PATH")
+		}
+		restore := flags("drillip restore", stderr)
+		input := restore.String("input", "", "required standalone Drillip backup file")
+		db := restore.String("db", os.Getenv("DRILLIP_DB"), "new destination database path; defaults to DRILLIP_DB")
+		if err := restore.Parse(rest); err != nil {
+			return err
+		}
+		if restore.NArg() != 0 || *input == "" || *db == "" {
+			return fmt.Errorf("restore requires --input PATH and a new --db PATH (or DRILLIP_DB)")
+		}
+		if err := store.Restore(ctx, *input, *db); err != nil {
+			return err
+		}
+		_, err := fmt.Fprintf(stdout, "restored %s\n", *db)
+		return err
 	case "serve":
 		if *server != "" {
 			return fmt.Errorf("--server selects a client target; use serve --listen")
@@ -113,49 +131,14 @@ Use drillip COMMAND --help for command options.
 		validateConfig(cfg)
 		return runServe(ctx, cfg)
 	case "maintenance":
-		if *server != "" || *legacyAddr != "" || *legacyDB != "" {
-			return fmt.Errorf("maintenance uses maintenance --db PATH; server/global database options are not accepted")
-		}
-		local := flags("drillip maintenance", stderr)
-		db := local.String("db", "", "required existing SQLite database path; no network or notifications")
-		if err := local.Parse(rest); err != nil {
-			return err
-		}
-		cmd, err := cli.Parse(local.Args(), stdout)
-		if err != nil {
-			return err
-		}
-		if local.Arg(0) == "health" {
-			return fmt.Errorf("health checks a server and is unavailable in maintenance")
-		}
-		if *db == "" {
-			return fmt.Errorf("maintenance requires an explicit --db PATH")
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		info, err := os.Stat(*db)
-		if err != nil {
-			return fmt.Errorf("maintenance database: %w", err)
-		}
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("maintenance database must be an existing file")
-		}
-		s, err := store.Open(*db)
-		if err != nil {
-			return fmt.Errorf("init db: %w", err)
-		}
-		defer s.Close()
-		app := service.New(s, nil, nil)
-		return cmd.Run(ctx, &cli.CLI{Errors: app, Correlation: app,
-			CommandPrefix: []string{"drillip", "maintenance", "--db", *db}}, stdout)
+		return fmt.Errorf("maintenance was removed; start drillip serve --db PATH, then use drillip --server URL COMMAND")
 	default:
 		cmd, err := cli.Parse(append([]string{mode}, rest...), stdout)
 		if err != nil {
 			return err
 		}
 		if *legacyDB != "" {
-			return fmt.Errorf("normal commands use the server; use maintenance --db PATH COMMAND for local access")
+			return fmt.Errorf("--db selects the server database; use drillip serve --db PATH and drillip --server URL COMMAND")
 		}
 		target := *server
 		if target == "" {
@@ -173,14 +156,7 @@ Use drillip COMMAND --help for command options.
 		if err != nil {
 			return err
 		}
-		if mode == "health" {
-			if err := client.Health(ctx); err != nil {
-				return fmt.Errorf("unhealthy: %w", err)
-			}
-			_, err = fmt.Fprintln(stdout, "ok")
-			return err
-		}
-		return cmd.Run(ctx, &cli.CLI{Errors: client, Correlation: client,
+		return cmd.Run(ctx, &cli.CLI{Errors: client, Correlation: client, Backups: client, Health: client,
 			CommandPrefix: []string{"drillip", "--server", target}}, stdout)
 	}
 }

@@ -18,6 +18,8 @@ type Command struct {
 	limit, hours, nth                     int
 	filter                                domain.ListFilter
 	listQuery                             domain.ListQuery
+	output                                string
+	details                               bool
 	duration                              time.Duration
 }
 
@@ -53,6 +55,10 @@ func Parse(args []string, help io.Writer) (*Command, error) {
 	}
 	var tag string
 	switch cmd.name {
+	case "health":
+		fs.BoolVar(&cmd.details, "details", false, "show persisted backup and restore timestamps")
+	case "backup":
+		fs.StringVar(&cmd.output, "output", "", "required new file for the database backup")
 	case "list":
 		fs.StringVar(&cmd.listQuery.Search, "search", "", "literal substring in full stored type or message (ASCII case-insensitive)")
 		fs.StringVar(&cmd.listQuery.Sort, "sort", domain.SortLastSeen, "order by last_seen or count, descending")
@@ -66,7 +72,7 @@ func Parse(args []string, help io.Writer) (*Command, error) {
 		fs.IntVar(&cmd.nth, "nth", 1, "occurrence index, starting at 1")
 	case "silence":
 		fs.StringVar(&cmd.reason, "reason", "", "reason for silencing")
-	case "show", "trend", "releases", "stats", "gc", "resolve", "silences", "unsilence", "health":
+	case "show", "trend", "releases", "stats", "gc", "resolve", "silences", "unsilence":
 	default:
 		return nil, fmt.Errorf("unknown command: %s", cmd.name)
 	}
@@ -81,6 +87,9 @@ func Parse(args []string, help io.Writer) (*Command, error) {
 		return nil, err
 	}
 	positional := fs.Args()
+	if cmd.name == "backup" && cmd.output == "" {
+		return nil, fmt.Errorf("backup requires --output PATH")
+	}
 	min, max := 0, 0
 	switch cmd.name {
 	case "show", "trend", "releases", "correlate", "resolve", "unsilence", "gc":
@@ -133,6 +142,10 @@ func Parse(args []string, help io.Writer) (*Command, error) {
 
 func (c *Command) Run(ctx context.Context, backend *CLI, w io.Writer) error {
 	switch c.name {
+	case "health":
+		return backend.runHealth(ctx, c, w)
+	case "backup":
+		return backend.runBackup(ctx, c, w)
 	case "list":
 		return backend.runList(ctx, c, w)
 	case "top":
