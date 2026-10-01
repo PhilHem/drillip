@@ -87,12 +87,16 @@ concrete adapters and services to check their behavior together.
 
 ## Bootstrap and the root executable
 
-`bootstrap` reads configuration, constructs the concrete dependencies, and
-connects them to services and adapters. It also runs the server lifecycle and
-dispatches CLI commands. Parsing produces a validated invocation before any
-backend is connected. Normal commands use one HTTP client implementing the
-application operations; the server owns storage, notification, and telemetry
-policy. Local restore checks and publishes a backup without starting the server.
+`bootstrap` reads configuration and connects services to concrete adapters.
+This keeps storage, email, and telemetry choices out of application services.
+It also coordinates server startup and shutdown.
+
+Investigation and management commands use the server through HTTP. This keeps
+database access, notification rules, and telemetry settings in one place for
+all callers.
+
+Local restore runs without a server, so recovery is possible even when the
+server cannot start. It checks the backup before creating a new database.
 
 The HTTP client accepts context on each operation and encapsulates target URLs,
 query encoding, compatibility checks, deadlines, status errors, and response
