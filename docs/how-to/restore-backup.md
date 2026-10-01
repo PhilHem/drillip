@@ -21,46 +21,36 @@ command. Lines without `$` show example output.
 ## 1. Restore the backup to a new volume
 
 Set `backup_file` to your backup's absolute path and `restore_image` to the
-matching image. Choose unused volume and container names:
+matching image. Choose an unused name for `restored_volume`:
 
 ```bash
-set -euo pipefail
 backup_file="$PWD/drillip-backup.db"
 restore_image=drillip:local
 restored_volume=drillip-restored
-restored_container=drillip-restore-check
-if docker volume inspect "$restored_volume" >/dev/null 2>&1; then
-  printf 'Choose a new destination volume name.\n' >&2
-  exit 1
-fi
-docker volume create "$restored_volume"
 ```
 
-Restore with the Drillip image. The backup mount is read-only:
+Run restore with the Drillip image. Docker creates the volume. The backup file
+is mounted read-only:
 
-```bash
-docker run --rm \
+```console
+$ docker run --rm \
   --mount "type=bind,src=$backup_file,dst=/backup.db,readonly" \
   --mount "type=volume,src=$restored_volume,dst=/data" \
   "$restore_image" restore --input /backup.db
-```
-
-The restore command reports the destination:
-
-```text
 restored /data/errors.db
 ```
 
-Continue only if the command succeeds. Drillip checks the backup and writes a
-complete new database. It preserves existing destination files.
+Continue only if restore succeeds. Drillip checks the backup and creates the
+new database. It refuses to overwrite an existing database.
 
 ## 2. Start a separate server to check the data
 
 Keep applications connected to their current server during a backup check.
-Start the restored server with the image's defaults. Its port is available only
-on the host's loopback address:
+Choose an unused container name and start the restored server with the image's
+defaults. Its port is available only on the host's loopback address:
 
 ```bash
+restored_container=drillip-restore-check
 docker run --detach --name "$restored_container" \
   --mount "type=volume,src=$restored_volume,dst=/data" \
   --publish 127.0.0.1:18301:8300 \
