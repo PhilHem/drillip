@@ -11,6 +11,11 @@ data. Every sender shares the instance's database and grouping rules. Use separa
 instances for independent histories or access boundaries; see
 [the operating model](../explanation/operating-model.md).
 
+Drillip computes its own grouping fingerprint. SDK-supplied custom `fingerprint`
+arrays, such as Python's `scope.fingerprint`, have no effect on grouping.
+See [custom SDK fingerprints](../explanation/error-lifecycle.md#custom-sdk-fingerprints)
+before relying on a Sentry grouping override.
+
 ```python
 # Python
 import sentry_sdk
