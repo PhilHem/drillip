@@ -1,7 +1,7 @@
 # Configuration reference
 
-This describes the current checkout. `DRILLIP_SERVER` and the new CLI modes
-require a matching client/server build; see [the migration guide](../how-to/upgrade-cli.md).
+This describes the current checkout. The server-based CLI
+requires a matching client/server build; see [the migration guide](../how-to/upgrade-cli.md).
 
 Drillip reads configuration from environment variables when it starts. All
 variables are optional. Unset or empty variables use the defaults below;
@@ -16,8 +16,8 @@ Legacy global `--addr` remains supported. Client target precedence is explicit
 `--server` or legacy `--addr` (mutually exclusive), then `DRILLIP_SERVER`, then
 legacy `DRILLIP_ADDR` converted to an HTTP URL, then `http://127.0.0.1:8300`.
 Wildcard legacy addresses map to loopback. Server listen configuration ignores
-`DRILLIP_SERVER`. Maintenance requires an explicit existing database path; see
-[CLI modes and migration](cli.md#local-maintenance).
+`DRILLIP_SERVER`. Client commands do not open the database selected by
+`DRILLIP_DB`. See [CLI migration](cli.md#upgrade-from-earlier-cli-versions).
 
 ## Core
 
@@ -72,7 +72,7 @@ Notifications are sent for:
   SMTP delivery. Other stale errors are still resolved, but omitted from the email.
 - **Manual resolutions** — the HTTP API and normal `drillip resolve` send a
   summary for the matched unresolved error, even if it was not previously
-  notified. Explicit `drillip maintenance --db PATH resolve` does not send email.
+  notified.
 
 Resolution summaries are sent directly, outside the new-error digest and
 cooldown. Silencing a fingerprint suppresses new-error and regression emails;
