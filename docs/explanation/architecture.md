@@ -56,7 +56,12 @@ downloaded file. Neither caller needs SQLite handles or knowledge of WAL files.
 Local restore is a storage operation wired directly by bootstrap. The SQLite
 adapter checks the copied input before any schema initialization or migration,
 records its provenance, and publishes it to a new destination. The source stays
-unchanged. Snapshot data time and operation history live in SQLite metadata;
+unchanged.
+
+Files and input streams share one verification and file creation path.
+Standard input lets a container receive a backup without a second file mount.
+
+Snapshot data time and operation history live in SQLite metadata;
 they do not depend on filesystem dates or container lifetime. Deployment control
 remains with the operator.
 
@@ -106,8 +111,9 @@ of the operations consumed by the CLI, not a repository used by the server.
 Application services reject already-cancelled contexts before storage access;
 synchronous repository calls are not yet interruptible through these ports.
 
-The root `main.go` handles process signals and exit status and delegates to
-bootstrap. Keeping the executable at the repository root preserves the
+The root executable owns process signals, standard input, and exit status.
+It makes pending input reads interruptible and delegates to bootstrap.
+Keeping `main.go` at the repository root preserves the
 install path `go install github.com/PhilHem/drillip@latest`. Application
 packages live under `internal/` and cannot be imported by unrelated projects.
 
