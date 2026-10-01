@@ -2,9 +2,8 @@
 
 Drillip separates application behavior from the protocols, storage, and
 external services that deliver it. HTTP handlers call inbound ports. Normal CLI
-commands reach the server through the HTTP client. Explicit local maintenance
-uses application services directly. Services coordinate domain models through
-explicit port interfaces.
+commands reach the server through the HTTP client. Services coordinate domain
+models through explicit port interfaces.
 
 The directories identify each part's role:
 
@@ -57,7 +56,12 @@ downloaded file. Neither caller needs SQLite handles or knowledge of WAL files.
 Local restore is a storage operation wired directly by bootstrap. The SQLite
 adapter checks the copied input before any schema initialization or migration,
 records its provenance, and publishes it to a new destination. The source stays
-unchanged. Snapshot data time and operation history live in SQLite metadata;
+unchanged.
+
+Files and input streams share one verification and file creation path.
+Standard input lets a container receive a backup without a second file mount.
+
+Snapshot data time and operation history live in SQLite metadata;
 they do not depend on filesystem dates or container lifetime. Deployment control
 remains with the operator.
 
@@ -88,13 +92,16 @@ concrete adapters and services to check their behavior together.
 
 ## Bootstrap and the root executable
 
-`bootstrap` reads configuration, constructs the concrete dependencies, and
-connects them to services and adapters. It also runs the server lifecycle and
-dispatches CLI commands. Parsing produces a validated invocation before any
-backend is connected. Normal commands use one HTTP client implementing the
-application operations; the server owns storage, notification, and telemetry
-policy. Explicit maintenance opens the selected existing database and constructs
-the application without a notifier or telemetry adapter.
+`bootstrap` reads configuration and connects services to concrete adapters.
+This keeps storage, email, and telemetry choices out of application services.
+It also coordinates server startup and shutdown.
+
+Investigation and management commands use the server through HTTP. This keeps
+database access, notification rules, and telemetry settings in one place for
+all callers.
+
+Local restore runs without a server, so recovery is possible even when the
+server cannot start. It checks the backup before creating a new database.
 
 The HTTP client accepts context on each operation and encapsulates target URLs,
 query encoding, compatibility checks, deadlines, status errors, and response
@@ -104,8 +111,9 @@ of the operations consumed by the CLI, not a repository used by the server.
 Application services reject already-cancelled contexts before storage access;
 synchronous repository calls are not yet interruptible through these ports.
 
-The root `main.go` handles process signals and exit status and delegates to
-bootstrap. Keeping the executable at the repository root preserves the
+The root executable owns process signals, standard input, and exit status.
+It makes pending input reads interruptible and delegates to bootstrap.
+Keeping `main.go` at the repository root preserves the
 install path `go install github.com/PhilHem/drillip@latest`. Application
 packages live under `internal/` and cannot be imported by unrelated projects.
 

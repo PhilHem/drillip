@@ -75,10 +75,12 @@ separate terminal: `ssh -N -L 18301:127.0.0.1:8301 user@tracker-host`. Then use
 
 ## 3. Update scripts and verify an operation
 
-Replace local database selection with the server target:
+Replace direct database commands, including `maintenance` and `--offline`, with
+the server target:
 
 ```sh
 # Earlier: drillip --db /data/errors.db top
+# Earlier: drillip maintenance --db /data/errors.db top
 ./drillip --server "$DRILLIP_SERVER" top
 ```
 
@@ -102,26 +104,11 @@ curl --fail --silent --show-error "$DRILLIP_SERVER/api/0/show/$fingerprint/" |
   jq --exit-status '.state == "resolved"'
 ```
 
-Expect the resolved fingerprint, then `true`. Normal resolution can send an email
+Expect the resolved fingerprint, then `true`. Resolution can send an email
 using the server's configuration. It confirms the state change, not mailbox
 delivery. An already resolved error returns a failure without a new change.
 Scripts must check exit status: zero means success; failures use stderr and a
 nonzero status. See [CLI migration details](../reference/cli.md#upgrade-from-earlier-cli-versions).
-
-## When direct database access is intentional
-
-Use explicit maintenance with the actual existing file and appropriate local
-permissions:
-
-```sh
-./drillip maintenance --db /data/errors.db show "$fingerprint"
-```
-
-Replace the old `--offline --db PATH resolve` with
-`maintenance --db PATH resolve`. Maintenance sends no email and does not collect
-remote telemetry. Missing files fail rather than creating a new database.
-The systemd-managed state directory may require service-administration privileges;
-normal server commands avoid that filesystem-access requirement.
 
 Before replacing a Docker deployment, [back up its database volume and verify a
 restore](restore-backup.md). Keep the original volume and configuration available

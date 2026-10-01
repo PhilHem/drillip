@@ -15,8 +15,7 @@ With no command, `drillip` starts the server, as does `drillip serve`.
 ```text
 drillip [--server <URL>] <command> [arguments]
 drillip serve [--listen <host:port>] [--db <path>]
-drillip restore --input <backup-path> [--db <new-path>]
-drillip maintenance --db <existing-path> <command> [arguments]
+drillip restore --input <path|-> [--db <new-path>]
 ```
 
 | Option | Effect |
@@ -25,7 +24,6 @@ drillip maintenance --db <existing-path> <command> [arguments]
 | `serve --listen <host:port>` | Server bind address; overrides `DRILLIP_ADDR`. |
 | `serve --db <path>` | Server SQLite path; overrides `DRILLIP_DB`. |
 | `restore --db <path>` | New local destination; required unless `DRILLIP_DB` supplies it. |
-| `maintenance --db <path>` | Explicit existing local database; no environment fallback. |
 | `--help`, `<command> --help` | Print help without opening a database or contacting a server. |
 
 Put `--server` before the command, and command options before positional
@@ -74,13 +72,14 @@ arguments. Do not type the brackets.
 | `drillip silence [--reason <text>] <fingerprint> [duration]` | Silence notifications for the uniquely identified error, indefinitely if duration is omitted. |
 | `drillip silences` | List active silences. |
 | `drillip unsilence <fingerprint>` | Remove silences for the uniquely identified error. |
-| `drillip health` | Call `/-/healthy` at the configured address; print `ok` on HTTP `200`, with a two-second request deadline. |
+| `drillip health [--details]` | Check database access; print `ok`, or show persisted backup and restore times with `--details`. |
 | `drillip backup --output <path>` | Save a complete database snapshot from the running server to a new local file. |
-| `drillip restore --input <path> [--db <new-path>]` | Check a standalone Drillip backup and restore it to a new local database. |
+| `drillip restore --input <input> [--db <new-path>]` | Restore a backup file or standard input (`-`) to a new local database. |
 
 Investigation and state commands have a ten-second deadline covering compatibility checking and
-the operation. `health` has a two-second deadline and does not need the command
-API compatibility check. Failures never fall back to a database, follow redirects,
+the operation. `health` has a two-second deadline. The simple probe does not need
+the command API compatibility check; `health --details` checks `database_history`.
+Failures never fall back to a database, follow redirects,
 or automatically retry mutations. A connection failure after submission may mean
 the server already changed state; inspect the state before retrying.
 
@@ -93,8 +92,7 @@ applied by the server, using the database's whole-second timestamp precision.
 
 `backup --output <path>` requires a new local filename. It uses the selected
 server and checks for the `database_backup` capability. An older server reports
-an upgrade requirement before any backup download starts. Local `maintenance`
-mode does not support this command.
+an upgrade requirement before any backup download starts.
 
 ```console
 $ drillip backup --output drillip-backup.db
@@ -113,7 +111,7 @@ separate. For restoration, see the [restore guide](../how-to/restore-backup.md).
 
 ## Restore a database backup
 
-`restore` uses local files. It does not contact a server or read notification and
+`restore` uses local input. It does not contact a server or read notification and
 telemetry settings. `DRILLIP_SERVER` is ignored; an explicit global `--server`,
 `--addr`, or `--db` is rejected. Set the destination with `restore --db` or
 `DRILLIP_DB`. The Docker image sets `DRILLIP_DB=/data/errors.db`.
@@ -122,6 +120,8 @@ telemetry settings. `DRILLIP_SERVER` is ignored; an explicit global `--server`,
 $ drillip restore --input drillip-backup.db --db restored.db
 restored restored.db
 ```
+
+For standard input, use [`restore --input -`](#restore-from-standard-input).
 
 Use a backup created by `drillip backup`. Restore checks the file before it
 creates the new database.
@@ -144,6 +144,34 @@ restored data time and clears the source database's operation history. The new
 restore time survives server restarts. Older backups have an unknown data time.
 Restore does not start the server or change the deployment. See the
 [restore guide](../how-to/restore-backup.md).
+
+## Check health and database history
+
+`health` calls `/-/healthy` and prints `ok` when the database is reachable.
+`health --details` calls `/api/0/health/` after a capability check. Its two-second
+deadline includes that check. Older servers report an upgrade requirement;
+their simple health probe remains usable.
+
+The times below are examples. Unknown times print `unknown`:
+
+```console
+$ drillip health --details
+status: ok
+last_backup_generated_at: 2026-09-30T12:00:08Z
+last_restored_at: 2026-09-30T11:30:00Z
+restored_snapshot_at: 2026-09-30T11:00:00Z
+```
+
+`last_backup_generated_at` records the last complete snapshot checked by this
+database's server. It does not confirm a complete client download or storage
+outside the server. `last_restored_at` records the last successful Drillip restore.
+`restored_snapshot_at` is the data time of that restore's input. It is unknown for
+older backups. New restores clear the source database's operation times; their
+own times survive server restarts. Manual copying does not record a new restore.
+
+These fields describe recorded operations. A missing or old backup does not
+change health status. Neither health output nor a restore timestamp proves that
+the database contains the history you expect; follow the restore guide's checks.
 
 ## Find error groups
 
@@ -172,7 +200,7 @@ the group's stored type and message, including text beyond the list's shortened
 Use `show` with a result's full fingerprint to read its details.
 
 When more matches exist, the output includes a next-page command that preserves
-the server or maintenance database, search, filters, sort order, and page size.
+the server, search, filters, sort order, and page size.
 Pages are separate queries: incoming errors can change their order between calls.
 Repeat the search from the first page if new activity changes the results.
 
@@ -186,27 +214,6 @@ feature in its
 If it does not, `list` asks you to upgrade the server. Existing commands continue
 to work with command API version 1 servers that do not offer this feature.
 
-## Local maintenance
-
-Use explicit maintenance when the server is unavailable and you deliberately
-want direct access to its existing database:
-
-```sh
-drillip maintenance --db /data/errors.db show 04827c
-drillip maintenance --db /data/errors.db resolve 04827c
-```
-
-Maintenance supports the same investigation and management commands, except
-`health`. It never sends HTTP requests or email, and does not queue notifications
-for later delivery. Correlation includes stored context only; remote telemetry
-and journal lookups are disabled. Missing database files are rejected to avoid
-silently creating the wrong database. A configured `DRILLIP_SERVER` or
-`DRILLIP_DB` does not change an explicit maintenance invocation. Explicit global
-server/database flags are rejected with maintenance.
-
-Normal `resolve` confirms the state change, not SMTP delivery. The running server
-owns notification configuration and delivery retries.
-
 ## Upgrade from earlier CLI versions
 
 Upgrade the server together with the CLI. Before each normal API operation, the
@@ -217,14 +224,17 @@ API endpoints and duration parameters.
 
 | Earlier invocation | Current invocation |
 |---|---|
-| `drillip --db /data/errors.db show 04827c` | `drillip --server http://127.0.0.1:8300 show 04827c`, or explicit `maintenance --db /data/errors.db show 04827c` |
-| `drillip --offline --db /data/errors.db resolve 04827c` | `drillip maintenance --db /data/errors.db resolve 04827c` |
+| `drillip --db /data/errors.db show 04827c` | `drillip --server http://127.0.0.1:8300 show 04827c` |
+| `drillip maintenance --db /data/errors.db show 04827c` | `drillip --server http://127.0.0.1:8300 show 04827c` |
+| `drillip --offline --db /data/errors.db resolve 04827c` | `drillip --server http://127.0.0.1:8300 resolve 04827c` |
 | `drillip --addr 0.0.0.0:8300 --db /data/errors.db serve` | `drillip serve --listen 0.0.0.0:8300 --db /data/errors.db` |
 
-`--offline` now fails with migration instructions. Global `--db` remains a legacy
-server-start option and is rejected for normal commands. `DRILLIP_DB` does not
-select local command execution. New normal commands require a running server;
-use maintenance for deliberate local access.
+`maintenance` and `--offline` fail with migration instructions. Global `--db`
+remains a legacy server-start option and is rejected for client commands.
+`DRILLIP_DB` does not select local command execution. To use a local database,
+start `drillip serve --db PATH`, then use `drillip --server URL COMMAND`.
+Resolution uses the server's notification configuration. Success confirms the
+state change, not email delivery.
 
 ## Fingerprints
 
@@ -243,3 +253,21 @@ still be removed by their exact stored fingerprint from `drillip silences`.
 
 For the meaning of counts and states, see the
 [error lifecycle explanation](../explanation/error-lifecycle.md).
+
+## Restore from standard input
+
+Use a file created by `drillip backup`. `restore --input -` reads that file from
+standard input. Set the new database path with `--db` or `DRILLIP_DB`:
+
+```console
+$ drillip restore --input - --db restored.db < drillip-backup.db
+restored restored.db
+```
+
+Restore reads the complete input before it checks the backup and creates the
+database. Empty input, read errors, and invalid backups fail. Failed
+restores remove temporary files. Existing destination files stay unchanged.
+The Docker image sets `DRILLIP_DB=/data/errors.db`.
+
+To read a file by path, use `--input drillip-backup.db`. To read a file named `-`,
+use `--input ./-`.

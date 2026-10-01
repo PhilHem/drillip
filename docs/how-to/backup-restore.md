@@ -1,9 +1,8 @@
 # Back up Drillip data
 
 Use this guide to save a database backup from a running Drillip server.
-To check an existing backup or recover data, use
-[Restore Drillip data in Docker](restore-backup.md). That procedure does not
-need access to the source server.
+To recover data from an existing backup, use
+[Restore Drillip data in Docker](restore-backup.md).
 
 ## Before you start
 
@@ -49,8 +48,10 @@ Copy the file to your backup storage. Record the server version and keep its
 matching image available for restoration. To schedule backups, run the same
 command from your existing scheduler with a different filename for each backup.
 
-## Check or restore the backup
+## Check the backup
 
-Use [Restore Drillip data in Docker](restore-backup.md) to check the backup in a
-separate server or recover a deployment. The procedure keeps the backup and the
-original volume.
+Complete steps 1 and 2 of [Restore Drillip data in Docker](restore-backup.md).
+Stop after the test server stops. Keep applications connected to their current
+server and do not replace the deployment.
+
+For recovery, follow all three steps of the restore guide.
