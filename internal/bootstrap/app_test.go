@@ -26,7 +26,7 @@ func TestRunGlobalFlags(t *testing.T) {
 	} {
 		t.Run(tc.arg, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			err := Run(context.Background(), []string{tc.arg}, &stdout, &stderr)
+			err := Run(context.Background(), []string{tc.arg}, nil, &stdout, &stderr)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatal(err)
@@ -51,7 +51,7 @@ func TestRunHealthDoesNotOpenDatabase(t *testing.T) {
 			w.WriteHeader(status)
 		}))
 		var stdout, stderr bytes.Buffer
-		err := Run(context.Background(), []string{"--addr", strings.TrimPrefix(srv.URL, "http://"), "health"}, &stdout, &stderr)
+		err := Run(context.Background(), []string{"--addr", strings.TrimPrefix(srv.URL, "http://"), "health"}, nil, &stdout, &stderr)
 		srv.Close()
 		if status == http.StatusOK {
 			if err != nil || stdout.String() != "ok\n" {
@@ -66,7 +66,7 @@ func TestRunHealthDoesNotOpenDatabase(t *testing.T) {
 func TestRunUnknownCommand(t *testing.T) {
 	t.Setenv("DRILLIP_DB", filepath.Join(t.TempDir(), "errors.db"))
 	var stdout, stderr bytes.Buffer
-	err := Run(context.Background(), []string{"unknown"}, &stdout, &stderr)
+	err := Run(context.Background(), []string{"unknown"}, nil, &stdout, &stderr)
 	if err == nil || !strings.Contains(err.Error(), "unknown command: unknown") {
 		t.Fatalf("error = %v, want unknown command", err)
 	}
@@ -82,7 +82,7 @@ func TestRunCommandErrors(t *testing.T) {
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			if err := Run(context.Background(), args, &stdout, &stderr); err == nil {
+			if err := Run(context.Background(), args, nil, &stdout, &stderr); err == nil {
 				t.Fatal("expected command failure")
 			}
 			if stdout.Len() != 0 {
@@ -92,7 +92,7 @@ func TestRunCommandErrors(t *testing.T) {
 	}
 	for _, args := range [][]string{{"top", "--help"}, {"silences", "--help"}} {
 		var stdout, stderr bytes.Buffer
-		if err := Run(context.Background(), args, &stdout, &stderr); err != nil {
+		if err := Run(context.Background(), args, nil, &stdout, &stderr); err != nil {
 			t.Fatalf("%v: %v", args, err)
 		}
 	}
@@ -111,7 +111,7 @@ func TestHealthDeadlineAndWildcardTarget(t *testing.T) {
 		_, port, _ := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))
 		var stdout, stderr bytes.Buffer
 		start := time.Now()
-		err := Run(context.Background(), []string{"--addr", "0.0.0.0:" + port, "health"}, &stdout, &stderr)
+		err := Run(context.Background(), []string{"--addr", "0.0.0.0:" + port, "health"}, nil, &stdout, &stderr)
 		srv.Close()
 		if stalled {
 			if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 4*time.Second {

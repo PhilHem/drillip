@@ -37,7 +37,7 @@ func TestBackupCLIProducesStandaloneDatabase(t *testing.T) {
 	t.Setenv("DRILLIP_SERVER", srv.URL+"/tracker")
 	output := filepath.Join(t.TempDir(), "backup with spaces.db")
 	var stdout, stderr bytes.Buffer
-	if err := Run(context.Background(), []string{"backup", "--output", output}, &stdout, &stderr); err != nil {
+	if err := Run(context.Background(), []string{"backup", "--output", output}, nil, &stdout, &stderr); err != nil {
 		t.Fatalf("%v; %s", err, &stderr)
 	}
 	if stdout.String() != "saved "+output+"\n" {
@@ -58,7 +58,7 @@ func TestBackupCLIProducesStandaloneDatabase(t *testing.T) {
 			t.Fatalf("%s: %d %v", table, n, err)
 		}
 	}
-	if err := Run(context.Background(), []string{"backup", "--output", output}, &stdout, &stderr); err == nil {
+	if err := Run(context.Background(), []string{"backup", "--output", output}, nil, &stdout, &stderr); err == nil {
 		t.Fatal("existing backup was replaced")
 	}
 }
@@ -111,7 +111,7 @@ func TestBackupCLIFailureDoesNotPublishFiles(t *testing.T) {
 			}))
 			defer srv.Close()
 			var stdout, stderr bytes.Buffer
-			err := Run(context.Background(), []string{"--server", srv.URL, "backup", "--output", output}, &stdout, &stderr)
+			err := Run(context.Background(), []string{"--server", srv.URL, "backup", "--output", output}, nil, &stdout, &stderr)
 			if err == nil || stdout.Len() != 0 {
 				t.Fatalf("err=%v output=%s", err, &stdout)
 			}
@@ -140,12 +140,12 @@ func TestBackupCLIFailureDoesNotPublishFiles(t *testing.T) {
 func TestBackupCLIValidatesArgumentsBeforeAccess(t *testing.T) {
 	for _, args := range [][]string{{"backup"}, {"backup", "--output", ""}, {"backup", "--output", "file.db", "extra"}} {
 		var stdout, stderr bytes.Buffer
-		if err := Run(context.Background(), args, &stdout, &stderr); err == nil {
+		if err := Run(context.Background(), args, nil, &stdout, &stderr); err == nil {
 			t.Fatalf("accepted %v", args)
 		}
 	}
 	var stdout, stderr bytes.Buffer
-	if err := Run(context.Background(), []string{"backup", "--help"}, &stdout, &stderr); err != nil || !strings.Contains(stdout.String(), "--output") && !strings.Contains(stdout.String(), "-output") {
+	if err := Run(context.Background(), []string{"backup", "--help"}, nil, &stdout, &stderr); err != nil || !strings.Contains(stdout.String(), "--output") && !strings.Contains(stdout.String(), "-output") {
 		t.Fatalf("help: %v %s %s", err, &stdout, &stderr)
 	}
 }

@@ -50,7 +50,7 @@ func TestResolveCLIUsesServerPolicyAndNeverOpensLocalDatabase(t *testing.T) {
 		}
 		if viaCLI {
 			var stdout, stderr bytes.Buffer
-			if err := Run(context.Background(), []string{"resolve", result.Fingerprint[:8]}, &stdout, &stderr); err != nil {
+			if err := Run(context.Background(), []string{"resolve", result.Fingerprint[:8]}, nil, &stdout, &stderr); err != nil {
 				t.Fatal(err)
 			}
 			if stdout.String() != "resolved "+result.Fingerprint+"\n" {
@@ -102,7 +102,7 @@ func TestResolveFailureNeverFallsBackToLocalDatabase(t *testing.T) {
 	t.Setenv("DRILLIP_ADDR", strings.TrimPrefix(srv.URL, "http://"))
 	t.Setenv("DRILLIP_DB", db)
 	var stdout, stderr bytes.Buffer
-	if err := Run(context.Background(), []string{"resolve", event.Fingerprint}, &stdout, &stderr); err == nil || !strings.Contains(err.Error(), "HTTP 503") {
+	if err := Run(context.Background(), []string{"resolve", event.Fingerprint}, nil, &stdout, &stderr); err == nil || !strings.Contains(err.Error(), "HTTP 503") {
 		t.Fatalf("server failure: %v", err)
 	}
 	detail, err := s.GetDetail(event.Fingerprint)
@@ -110,7 +110,7 @@ func TestResolveFailureNeverFallsBackToLocalDatabase(t *testing.T) {
 		t.Fatal("failed HTTP request mutated local database")
 	}
 	for _, args := range [][]string{{"--offline", "top"}, {"--db", db, "resolve", event.Fingerprint}, {"maintenance", "--db", db, "resolve", event.Fingerprint}} {
-		if err := Run(context.Background(), args, &stdout, &stderr); err == nil {
+		if err := Run(context.Background(), args, nil, &stdout, &stderr); err == nil {
 			t.Fatalf("accepted invalid mode: %v", args)
 		}
 	}

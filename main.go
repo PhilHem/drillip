@@ -20,5 +20,7 @@ func main() {
 func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
-	return bootstrap.Run(ctx, os.Args[1:], os.Stdout, os.Stderr)
+	input := newProcessInput(ctx, os.Stdin)
+	defer input.Close()
+	return bootstrap.Run(ctx, os.Args[1:], input, os.Stdout, os.Stderr)
 }
