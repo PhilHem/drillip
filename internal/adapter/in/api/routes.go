@@ -15,6 +15,9 @@ func (h *Handler) Routes() http.Handler {
 			return
 		}
 		features := []string{httpwire.FeatureErrorList}
+		if h.Database != nil {
+			features = append(features, httpwire.FeatureDatabaseHistory)
+		}
 		if h.Backups != nil {
 			features = append(features, httpwire.FeatureDatabaseBackup)
 		}
@@ -22,6 +25,7 @@ func (h *Handler) Routes() http.Handler {
 	})
 	mux.HandleFunc("/api/0/list/", h.HandleList)
 	mux.HandleFunc("/api/0/backup/", h.HandleBackup)
+	mux.HandleFunc("/api/0/health/", h.HandleHealthDetails)
 	mux.HandleFunc("/api/0/top/", h.HandleTop)
 	mux.HandleFunc("/api/0/recent/", h.HandleRecent)
 	mux.HandleFunc("/api/0/show/", h.HandleShow)

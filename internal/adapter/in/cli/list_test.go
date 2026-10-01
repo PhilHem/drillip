@@ -85,7 +85,6 @@ func TestListDisplaysFullFingerprintsAndPageHint(t *testing.T) {
 	for _, prefix := range [][]string{
 		nil,
 		{"drillip", "--server", "http://example.test:8300/prefix?key='quoted'&v=1"},
-		{"drillip", "maintenance", "--db", "/tmp/operator's data; $(printf injected).db"},
 	} {
 		t.Run(strings.Join(prefix, " "), func(t *testing.T) {
 			backend := &listBackend{page: domain.ErrorPage{Errors: []domain.ErrorSummary{

@@ -22,6 +22,7 @@ type Handler struct {
 	Correlation   inport.Correlator
 	Notifications inport.Notifications
 	Backups       inport.Backups
+	Database      inport.DatabaseStatus
 }
 
 func (h *Handler) HandleTop(w http.ResponseWriter, r *http.Request) {
