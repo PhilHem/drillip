@@ -17,7 +17,9 @@ import (
 type CLI struct {
 	Errors      inport.Errors
 	Correlation inport.Correlator
-	// CommandPrefix preserves the selected backend in pagination hints.
+	Backups     inport.Backups
+	Health      inport.ServerHealth
+	// CommandPrefix preserves the selected server in pagination hints.
 	// An empty prefix defaults to drillip.
 	CommandPrefix []string
 }
