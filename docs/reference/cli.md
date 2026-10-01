@@ -15,6 +15,7 @@ With no command, `drillip` starts the server, as does `drillip serve`.
 ```text
 drillip [--server <URL>] <command> [arguments]
 drillip serve [--listen <host:port>] [--db <path>]
+drillip restore --input <backup-path> [--db <new-path>]
 drillip maintenance --db <existing-path> <command> [arguments]
 ```
 
@@ -23,6 +24,7 @@ drillip maintenance --db <existing-path> <command> [arguments]
 | `--server <URL>` | Client target; HTTP or HTTPS, optionally with a path prefix. Overrides `DRILLIP_SERVER`. |
 | `serve --listen <host:port>` | Server bind address; overrides `DRILLIP_ADDR`. |
 | `serve --db <path>` | Server SQLite path; overrides `DRILLIP_DB`. |
+| `restore --db <path>` | New local destination; required unless `DRILLIP_DB` supplies it. |
 | `maintenance --db <path>` | Explicit existing local database; no environment fallback. |
 | `--help`, `<command> --help` | Print help without opening a database or contacting a server. |
 
@@ -74,6 +76,7 @@ arguments. Do not type the brackets.
 | `drillip unsilence <fingerprint>` | Remove silences for the uniquely identified error. |
 | `drillip health` | Call `/-/healthy` at the configured address; print `ok` on HTTP `200`, with a two-second request deadline. |
 | `drillip backup --output <path>` | Save a complete database snapshot from the running server to a new local file. |
+| `drillip restore --input <path> [--db <new-path>]` | Check a standalone Drillip backup and restore it to a new local database. |
 
 Investigation and state commands have a ten-second deadline covering compatibility checking and
 the operation. `health` has a two-second deadline and does not need the command
@@ -107,6 +110,40 @@ Failed downloads remove the temporary file and do not publish the destination.
 
 The snapshot includes all stored database data. Deployment configuration is
 separate. For restoration, see the [backup and restore guide](../how-to/backup-restore.md).
+
+## Restore a database backup
+
+`restore` uses local files. It does not contact a server or read notification and
+telemetry settings. `DRILLIP_SERVER` is ignored; an explicit global `--server`,
+`--addr`, or `--db` is rejected. Set the destination with `restore --db` or
+`DRILLIP_DB`. The Docker image sets `DRILLIP_DB=/data/errors.db`.
+
+```console
+$ drillip restore --input drillip-backup.db --db restored.db
+restored restored.db
+```
+
+Use a backup created by `drillip backup`. Restore checks the file before it
+creates the new database.
+
+Use a matching Drillip build. Older Drillip backups without format metadata are
+accepted if their schema is compatible.
+
+Choose a new destination path in an existing directory. Restore does not overwrite
+files or follow a symbolic link at that path. The backup file stays unchanged.
+
+SQLite can create additional files beside a database. For the example above,
+`restored.db-wal`, `restored.db-shm`, and `restored.db-journal` must not exist.
+
+Restore checks a temporary copy and records the restore time in it. It then
+creates the destination file with permissions `0600`. If it fails before that
+step, it removes the temporary files.
+
+New backups record the snapshot's data time. Restore preserves that time as the
+restored data time and clears the source database's operation history. The new
+restore time survives server restarts. Older backups have an unknown data time.
+Restore does not start the server or change the deployment. See the
+[backup and restore guide](../how-to/backup-restore.md).
 
 ## Find error groups
 

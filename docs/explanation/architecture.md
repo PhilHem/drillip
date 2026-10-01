@@ -54,6 +54,13 @@ HTTP handler. A forwarding service would add no policy or coordination here.
 The HTTP client implements the same operation for the CLI, which publishes the
 downloaded file. Neither caller needs SQLite handles or knowledge of WAL files.
 
+Local restore is a storage operation wired directly by bootstrap. The SQLite
+adapter checks the copied input before any schema initialization or migration,
+records its provenance, and publishes it to a new destination. The source stays
+unchanged. Snapshot data time and operation history live in SQLite metadata;
+they do not depend on filesystem dates or container lifetime. Deployment control
+remains with the operator.
+
 ## Adapters and dependency direction
 
 Inbound adapters parse requests and format responses. They call inbound ports
