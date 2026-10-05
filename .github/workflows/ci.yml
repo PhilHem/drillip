@@ -15,7 +15,7 @@ jobs:
     env:
       DRILLIP_IMAGE: ${{ matrix.drillip == 'checkout' && 'drillip:ci' || 'ghcr.io/philhem/drillip:v0.3.18' }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Build checkout image
         if: matrix.drillip == 'checkout'
         run: docker build -t drillip:ci .
@@ -29,7 +29,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -46,7 +46,7 @@ jobs:
   vulncheck:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
