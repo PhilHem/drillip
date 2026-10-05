@@ -3,7 +3,7 @@ module github.com/PhilHem/drillip
 go 1.26
 
 require (
-	github.com/andybalholm/brotli v1.2.1
+	github.com/andybalholm/brotli v1.2.6
 	modernc.org/sqlite v1.52.0
 )
 
