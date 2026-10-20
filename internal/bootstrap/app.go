@@ -16,9 +16,9 @@ import (
 )
 
 // Run parses an invocation before connecting its explicitly selected backend.
-func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	initLogger(stderr)
-	err := run(ctx, args, stdout, stderr)
+	err := run(ctx, args, stdin, stdout, stderr)
 	if errors.Is(err, flag.ErrHelp) {
 		return nil
 	}
@@ -30,7 +30,7 @@ func flags(name string, w io.Writer) *flag.FlagSet {
 	fs.Usage = func() { fmt.Fprintf(w, "Usage of %s:\n", name); fs.SetOutput(w); fs.PrintDefaults() }
 	return fs
 }
-func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	fs := flags("drillip", stderr)
 	server := fs.String("server", "", "Drillip server URL (overrides DRILLIP_SERVER)")
 	legacyAddr := fs.String("addr", "", "deprecated: use --server URL or serve --listen address")
@@ -92,7 +92,7 @@ Use drillip COMMAND --help for command options.
 			return fmt.Errorf("restore uses local files; use restore --input PATH --db PATH")
 		}
 		restore := flags("drillip restore", stderr)
-		input := restore.String("input", "", "required standalone Drillip backup file")
+		input := restore.String("input", "", "required Drillip backup file; use - to read standard input")
 		db := restore.String("db", os.Getenv("DRILLIP_DB"), "new destination database path; defaults to DRILLIP_DB")
 		if err := restore.Parse(rest); err != nil {
 			return err
@@ -100,10 +100,16 @@ Use drillip COMMAND --help for command options.
 		if restore.NArg() != 0 || *input == "" || *db == "" {
 			return fmt.Errorf("restore requires --input PATH and a new --db PATH (or DRILLIP_DB)")
 		}
-		if err := store.Restore(ctx, *input, *db); err != nil {
+		var err error
+		if *input == "-" {
+			err = store.RestoreFromReader(ctx, stdin, *db)
+		} else {
+			err = store.Restore(ctx, *input, *db)
+		}
+		if err != nil {
 			return err
 		}
-		_, err := fmt.Fprintf(stdout, "restored %s\n", *db)
+		_, err = fmt.Fprintf(stdout, "restored %s\n", *db)
 		return err
 	case "serve":
 		if *server != "" {

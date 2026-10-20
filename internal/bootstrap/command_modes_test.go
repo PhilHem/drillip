@@ -69,7 +69,7 @@ func TestEveryNormalCommandUsesServer(t *testing.T) {
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			var out, errout bytes.Buffer
-			if err := Run(context.Background(), tc.args, &out, &errout); err != nil || !strings.Contains(out.String(), tc.want) {
+			if err := Run(context.Background(), tc.args, nil, &out, &errout); err != nil || !strings.Contains(out.String(), tc.want) {
 				t.Fatalf("err=%v output=%s stderr=%s", err, &out, &errout)
 			}
 		})
@@ -88,7 +88,7 @@ func TestHelpAndInvalidInputNeverAccessBackend(t *testing.T) {
 		{"unknown"}, {"show"}, {"show", "bad!"}, {"show", "abcd", "extra"}, {"top", "--limit", "0"}, {"recent", "--hours", "-1"}, {"silence", "abcd", "bad-duration"}, {"gc", "nonsense"}, {"stats", "unexpected"}, {"health", "unexpected"},
 	} {
 		var out, errout bytes.Buffer
-		_ = Run(context.Background(), args, &out, &errout)
+		_ = Run(context.Background(), args, nil, &out, &errout)
 	}
 	if calls.Load() != 0 {
 		t.Fatalf("made %d requests", calls.Load())
@@ -135,7 +135,7 @@ func TestRemovedMaintenanceNeverAccessesBackend(t *testing.T) {
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			var out, errout bytes.Buffer
-			err := Run(context.Background(), args, &out, &errout)
+			err := Run(context.Background(), args, nil, &out, &errout)
 			if err == nil || !strings.Contains(err.Error(), "was removed") || !strings.Contains(err.Error(), "serve --db PATH") || !strings.Contains(err.Error(), "--server URL COMMAND") {
 				t.Fatalf("missing migration instructions: %v", err)
 			}
@@ -172,7 +172,7 @@ func TestClientTargetPrecedencePreservesLegacyAddress(t *testing.T) {
 	runHealth := func(args ...string) {
 		t.Helper()
 		var out bytes.Buffer
-		if err := Run(context.Background(), args, &out, &out); err != nil {
+		if err := Run(context.Background(), args, nil, &out, &out); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -194,7 +194,7 @@ func TestClientTargetPrecedencePreservesLegacyAddress(t *testing.T) {
 		t.Fatal("explicit legacy address did not override environment")
 	}
 	var out bytes.Buffer
-	if err := Run(context.Background(), []string{"--server", a.URL, "--addr", "other:8300", "health"}, &out, &out); err == nil {
+	if err := Run(context.Background(), []string{"--server", a.URL, "--addr", "other:8300", "health"}, nil, &out, &out); err == nil {
 		t.Fatal("accepted conflicting targets")
 	}
 }

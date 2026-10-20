@@ -5,9 +5,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -282,5 +284,136 @@ func TestRestoreAcceptsLegacyBackupWithUnknownSnapshotTime(t *testing.T) {
 	history, err := s.DatabaseHistory(context.Background())
 	if err != nil || history.LastRestoredAt == nil || history.RestoredSnapshotAt != nil {
 		t.Fatalf("legacy history=%+v err=%v", history, err)
+	}
+}
+
+type restoreReaderFunc func([]byte) (int, error)
+
+func (read restoreReaderFunc) Read(p []byte) (int, error) { return read(p) }
+
+func TestRestoreFromReaderWaitsForEOFAndPreservesAllData(t *testing.T) {
+	s, input := restoreFixture(t)
+	data, err := os.ReadFile(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	stop := context.AfterFunc(ctx, func() { _ = reader.CloseWithError(ctx.Err()) })
+	defer stop()
+	output := filepath.Join(t.TempDir(), "stream.db")
+	done := make(chan error, 1)
+	go func() { done <- RestoreFromReader(ctx, reader, output) }()
+	if _, err := writer.Write(data); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("restore finished before EOF: %v", err)
+	default:
+	}
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatal("restore published before EOF")
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(output)
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("mode=%v err=%v", info, err)
+	}
+	restored, err := Open(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	if got, want := databaseRows(t, restored.db), databaseRows(t, s.db); got != want {
+		t.Fatalf("stream restore lost rows\ngot: %s\nwant: %s", got, want)
+	}
+	history, err := restored.DatabaseHistory(ctx)
+	if err != nil || history.LastRestoredAt == nil || history.RestoredSnapshotAt == nil || history.LastBackupGeneratedAt != nil {
+		t.Fatalf("history=%+v err=%v", history, err)
+	}
+}
+
+func TestRestoreFromReaderRejectsFailedStreamsWithoutPublishing(t *testing.T) {
+	_, input := restoreFixture(t)
+	data, err := os.ReadFile(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readErr := errors.New("backup transfer failed")
+	for _, failure := range []string{"empty", "invalid", "truncated", "read-error", "cancel-at-eof", "destination-race"} {
+		t.Run(failure, func(t *testing.T) {
+			dir := t.TempDir()
+			output := filepath.Join(dir, "restored.db")
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var source io.Reader
+			switch failure {
+			case "empty":
+				source = strings.NewReader("")
+			case "invalid":
+				source = strings.NewReader("not a backup")
+			case "truncated":
+				source = bytes.NewReader(data[:len(data)/2])
+			case "read-error":
+				source = io.MultiReader(bytes.NewReader(data), restoreReaderFunc(func([]byte) (int, error) { return 0, readErr }))
+			case "cancel-at-eof":
+				source = io.MultiReader(bytes.NewReader(data), restoreReaderFunc(func([]byte) (int, error) {
+					cancel()
+					return 0, io.EOF
+				}))
+			case "destination-race":
+				source = io.MultiReader(bytes.NewReader(data), restoreReaderFunc(func([]byte) (int, error) {
+					if err := os.WriteFile(output, []byte("keep concurrent file"), 0600); err != nil {
+						return 0, err
+					}
+					return 0, io.EOF
+				}))
+			}
+			err := RestoreFromReader(ctx, source, output)
+			if err == nil {
+				t.Fatal("accepted failed stream")
+			}
+			if failure == "read-error" && !errors.Is(err, readErr) {
+				t.Fatal(err)
+			}
+			if failure == "cancel-at-eof" && !errors.Is(err, context.Canceled) {
+				t.Fatal(err)
+			}
+			if failure == "destination-race" {
+				if got, _ := os.ReadFile(output); string(got) != "keep concurrent file" {
+					t.Fatal("replaced concurrent destination")
+				}
+			} else if _, err := os.Lstat(output); !os.IsNotExist(err) {
+				t.Fatal("failed stream published a database")
+			}
+			staged, err := filepath.Glob(filepath.Join(dir, ".drillip-restore-*"))
+			if err != nil || len(staged) != 0 {
+				t.Fatalf("temporary files=%v err=%v", staged, err)
+			}
+		})
+	}
+}
+
+func TestRestoreFromReaderRejectsExistingDestinationBeforeReading(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "existing.db")
+	if err := os.WriteFile(output, []byte("keep existing file"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	read := false
+	source := restoreReaderFunc(func([]byte) (int, error) { read = true; return 0, io.EOF })
+	if err := RestoreFromReader(context.Background(), source, output); err == nil || read {
+		t.Fatalf("err=%v read=%v", err, read)
+	}
+	if got, _ := os.ReadFile(output); string(got) != "keep existing file" {
+		t.Fatal("changed destination")
 	}
 }

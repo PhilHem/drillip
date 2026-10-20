@@ -17,13 +17,6 @@ func Restore(ctx context.Context, input, destination string) (err error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	for _, path := range []string{destination, destination + "-wal", destination + "-shm", destination + "-journal"} {
-		if _, err := os.Lstat(path); err == nil {
-			return fmt.Errorf("restore destination already exists: %s; choose a new database path", path)
-		} else if !os.IsNotExist(err) {
-			return err
-		}
-	}
 	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
 		if _, err := os.Lstat(input + suffix); err == nil {
 			return fmt.Errorf("restore requires a standalone backup; %s exists", input+suffix)
@@ -46,6 +39,26 @@ func Restore(ctx context.Context, input, destination string) (err error) {
 	info, err = source.Stat()
 	if err != nil || !info.Mode().IsRegular() {
 		return fmt.Errorf("restore input must be a regular backup file")
+	}
+	return RestoreFromReader(ctx, source, destination)
+}
+
+// RestoreFromReader checks a complete backup stream and publishes a new database.
+// It reads through EOF before verification and never replaces the destination.
+// The caller owns the reader and must unblock a pending read on cancellation.
+func RestoreFromReader(ctx context.Context, source io.Reader, destination string) (err error) {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if source == nil {
+		return fmt.Errorf("restore input is unavailable")
+	}
+	for _, path := range []string{destination, destination + "-wal", destination + "-shm", destination + "-journal"} {
+		if _, err := os.Lstat(path); err == nil {
+			return fmt.Errorf("restore destination already exists: %s; choose a new database path", path)
+		} else if !os.IsNotExist(err) {
+			return err
+		}
 	}
 	stage, err := os.CreateTemp(filepath.Dir(destination), ".drillip-restore-*")
 	if err != nil {
@@ -162,5 +175,9 @@ func (r contextReader) Read(p []byte) (int, error) {
 	if err := r.ctx.Err(); err != nil {
 		return 0, err
 	}
-	return r.reader.Read(p)
+	n, err := r.reader.Read(p)
+	if ctxErr := r.ctx.Err(); ctxErr != nil {
+		return n, ctxErr
+	}
+	return n, err
 }

@@ -183,3 +183,21 @@ still be removed by their exact stored fingerprint from `drillip silences`.
 
 For the meaning of counts and states, see the
 [error lifecycle explanation](../explanation/error-lifecycle.md).
+
+## Restore from standard input
+
+Use a file created by `drillip backup`. `restore --input -` reads that file from
+standard input. Set the new database path with `--db` or `DRILLIP_DB`:
+
+```console
+$ drillip restore --input - --db restored.db < drillip-backup.db
+restored restored.db
+```
+
+Restore reads the complete input before it checks the backup and creates the
+database. Empty input, read errors, and invalid backups fail. Failed
+restores remove temporary files. Existing destination files stay unchanged.
+The Docker image sets `DRILLIP_DB=/data/errors.db`.
+
+To read a file by path, use `--input drillip-backup.db`. To read a file named `-`,
+use `--input ./-`.

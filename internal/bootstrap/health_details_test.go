@@ -28,7 +28,7 @@ func TestHealthDetailsTracksBackupRestoreAndRestart(t *testing.T) {
 	run := func(target string) string {
 		t.Helper()
 		out.Reset()
-		if err := Run(context.Background(), []string{"--server", target, "health", "--details"}, &out, &errOut); err != nil {
+		if err := Run(context.Background(), []string{"--server", target, "health", "--details"}, nil, &out, &errOut); err != nil {
 			t.Fatal(err)
 		}
 		return out.String()
@@ -37,14 +37,14 @@ func TestHealthDetailsTracksBackupRestoreAndRestart(t *testing.T) {
 		t.Fatal(got)
 	}
 	output := filepath.Join(t.TempDir(), "backup.db")
-	if err := Run(context.Background(), []string{"--server", srv.URL, "backup", "--output", output}, &out, &errOut); err != nil {
+	if err := Run(context.Background(), []string{"--server", srv.URL, "backup", "--output", output}, nil, &out, &errOut); err != nil {
 		t.Fatal(err)
 	}
 	if got := run(srv.URL); strings.Contains(got, "last_backup_generated_at: unknown") || !strings.Contains(got, "last_restored_at: unknown") {
 		t.Fatal(got)
 	}
 	restoredPath := filepath.Join(t.TempDir(), "restored.db")
-	if err := Run(context.Background(), []string{"restore", "--input", output, "--db", restoredPath}, &out, &errOut); err != nil {
+	if err := Run(context.Background(), []string{"restore", "--input", output, "--db", restoredPath}, nil, &out, &errOut); err != nil {
 		t.Fatal(err)
 	}
 	restored, err := store.Open(restoredPath)
@@ -102,7 +102,7 @@ func TestHealthDetailsFailureDoesNotPrintSuccess(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
 			var out, errOut bytes.Buffer
-			err := Run(ctx, []string{"--server", srv.URL, "health", "--details"}, &out, &errOut)
+			err := Run(ctx, []string{"--server", srv.URL, "health", "--details"}, nil, &out, &errOut)
 			if err == nil || out.Len() != 0 {
 				t.Fatalf("err=%v output=%s", err, &out)
 			}

@@ -34,7 +34,7 @@ func TestSlowOptionalMetricsCannotEraseStoredCorrelation(t *testing.T) {
 	defer srv.Close()
 	var out, errout bytes.Buffer
 	start := time.Now()
-	err = Run(context.Background(), []string{"--server", srv.URL, "correlate", event.Fingerprint}, &out, &errout)
+	err = Run(context.Background(), []string{"--server", srv.URL, "correlate", event.Fingerprint}, nil, &out, &errout)
 	if err != nil || !strings.Contains(out.String(), event.Fingerprint) || !strings.Contains(out.String(), "stored context survives") || time.Since(start) > 8*time.Second {
 		t.Fatalf("err=%v elapsed=%v output=%s", err, time.Since(start), &out)
 	}
