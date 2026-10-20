@@ -122,3 +122,7 @@ Replace the old `--offline --db PATH resolve` with
 remote telemetry. Missing files fail rather than creating a new database.
 The systemd-managed state directory may require service-administration privileges;
 normal server commands avoid that filesystem-access requirement.
+
+Before replacing a Docker deployment, [back up its database volume and verify a
+restore](backup-restore.md). Keep the original volume and configuration available
+until the upgraded deployment is verified.
